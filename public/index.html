@@ -1,0 +1,270 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>PhishGuard | Scan before you click</title>
+    <meta
+      name="description"
+      content="PhishGuard analyzes suspicious links and sender addresses before you open an attachment or click a link."
+    />
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <div class="aurora aurora-left"></div>
+    <div class="aurora aurora-right"></div>
+
+    <div class="app-shell">
+      <header class="hero panel">
+        <div class="brand-row">
+          <div class="brand-mark">PG</div>
+          <div>
+            <p class="eyebrow">PhishGuard</p>
+            <h1>Scan before you click</h1>
+          </div>
+        </div>
+
+        <div class="hero-grid">
+          <div class="hero-copy">
+            <p class="lede">
+              Inspect suspicious URLs and sender addresses with a layered phishing workflow
+              before you trust the message.
+            </p>
+
+            <div class="disclaimer">
+              No email contents are stored on the server. Only scan metadata stays in your own
+              browser history for review and export.
+            </div>
+
+            <div class="hero-actions">
+              <button id="combinedScanBtn" class="button button-primary">
+                Run combined scan
+              </button>
+              <a class="button button-secondary" href="#historySection">Review history</a>
+            </div>
+          </div>
+
+          <aside class="overview-card">
+            <p class="eyebrow">Live posture</p>
+            <div class="overview-metrics">
+              <div>
+                <span class="metric-value" id="totalScansMetric">0</span>
+                <span class="metric-label">Total scans</span>
+              </div>
+              <div>
+                <span class="metric-value" id="dangerScansMetric">0</span>
+                <span class="metric-label">Dangerous</span>
+              </div>
+              <div>
+                <span class="metric-value" id="disposableMetric">0</span>
+                <span class="metric-label">Disposable hits</span>
+              </div>
+            </div>
+            <div id="combinedSummary" class="combined-summary">
+              Combined scan results will appear here after you run both checks together.
+            </div>
+          </aside>
+        </div>
+      </header>
+
+      <main>
+        <section class="scanner-grid">
+          <article class="panel scanner-panel">
+            <div class="panel-heading">
+              <div>
+                <p class="eyebrow">Feature 1</p>
+                <h2>URL Security Scanner</h2>
+              </div>
+              <span class="pill pill-neutral">VirusTotal</span>
+            </div>
+
+            <form id="urlScanForm" class="scan-form">
+              <label for="urlInput">Suspicious URL</label>
+              <div class="field-row">
+                <input
+                  id="urlInput"
+                  name="url"
+                  type="url"
+                  placeholder="https://suspicious-link.example"
+                  autocomplete="off"
+                  required
+                />
+                <button type="submit" id="urlScanBtn" class="button button-primary">
+                  Scan URL
+                </button>
+              </div>
+              <p class="helper-text">
+                Threat score is based on vendor detections, suspicious verdicts, and rate-limit
+                aware reporting.
+              </p>
+            </form>
+
+            <div id="urlResult" class="result-card result-empty">
+              URL scan results will appear here.
+            </div>
+          </article>
+
+          <article class="panel scanner-panel">
+            <div class="panel-heading">
+              <div>
+                <p class="eyebrow">Feature 2</p>
+                <h2>Sender Email Validator</h2>
+              </div>
+              <span class="pill pill-neutral">Disify + Abstract</span>
+            </div>
+
+            <form id="emailScanForm" class="scan-form">
+              <label for="emailInput">Sender email address</label>
+              <div class="field-row">
+                <input
+                  id="emailInput"
+                  name="email"
+                  type="email"
+                  placeholder="billing@company-example.com"
+                  autocomplete="off"
+                  required
+                />
+                <button type="submit" id="emailScanBtn" class="button button-primary">
+                  Validate sender
+                </button>
+              </div>
+              <p class="helper-text">
+                Trust score combines disposable detection, deliverability checks, and sender
+                pattern heuristics.
+              </p>
+            </form>
+
+            <div id="emailResult" class="result-card result-empty">
+              Sender validation results will appear here.
+            </div>
+          </article>
+        </section>
+
+        <section class="insights-grid">
+          <article class="panel">
+            <div class="panel-heading">
+              <div>
+                <p class="eyebrow">Activity</p>
+                <h2>Recent timeline</h2>
+              </div>
+            </div>
+            <div id="timeline" class="timeline">
+              <div class="timeline-empty">Run a scan to build your investigation timeline.</div>
+            </div>
+          </article>
+
+          <article class="panel">
+            <div class="panel-heading">
+              <div>
+                <p class="eyebrow">Privacy</p>
+                <h2>Data handling</h2>
+              </div>
+            </div>
+            <ul class="privacy-list">
+              <li>API keys stay server-side in `.env`.</li>
+              <li>Only HTTPS upstream calls are used for scanning.</li>
+              <li>Scan history is stored locally in browser `localStorage` only.</li>
+              <li>Exported CSV files are generated on demand in the browser.</li>
+            </ul>
+          </article>
+        </section>
+
+        <section id="historySection" class="panel history-panel">
+          <div class="panel-heading">
+            <div>
+              <p class="eyebrow">Feature 3</p>
+              <h2>Scan History Dashboard</h2>
+            </div>
+            <div class="history-actions">
+              <button id="clearHistoryBtn" class="button button-secondary">Clear history</button>
+            </div>
+          </div>
+
+          <div class="filters-grid">
+            <label>
+              Search
+              <input
+                id="searchInput"
+                type="search"
+                placeholder="Search by URL, email, or domain"
+                autocomplete="off"
+              />
+            </label>
+
+            <label>
+              Sort
+              <select id="sortSelect">
+                <option value="date_desc">Date: newest first</option>
+                <option value="date_asc">Date: oldest first</option>
+                <option value="threat_desc">Threat: high to low</option>
+                <option value="threat_asc">Threat: low to high</option>
+                <option value="type_asc">Scan type</option>
+              </select>
+            </label>
+
+            <label>
+              Threat level
+              <select id="threatFilter">
+                <option value="all">All</option>
+                <option value="safe">Safe</option>
+                <option value="suspicious">Suspicious</option>
+                <option value="dangerous">Dangerous</option>
+              </select>
+            </label>
+
+            <label>
+              Scan type
+              <select id="typeFilter">
+                <option value="all">All</option>
+                <option value="url">URL</option>
+                <option value="email">Email</option>
+                <option value="combined">Both</option>
+              </select>
+            </label>
+
+            <label>
+              From
+              <input id="fromDate" type="date" />
+            </label>
+
+            <label>
+              To
+              <input id="toDate" type="date" />
+            </label>
+
+            <label class="checkbox-label">
+              <input id="disposableOnly" type="checkbox" />
+              Disposable emails only
+            </label>
+          </div>
+
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Timestamp</th>
+                  <th>Type</th>
+                  <th>Indicator</th>
+                  <th>Domain</th>
+                  <th>Threat</th>
+                  <th>Summary</th>
+                  <th>Disposable</th>
+                </tr>
+              </thead>
+              <tbody id="historyTableBody">
+                <tr>
+                  <td colspan="7" class="table-empty">No scans stored yet.</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+      </main>
+
+      <button id="exportBtn" class="button button-primary floating-export">Export results</button>
+      <div id="toastHost" class="toast-host" aria-live="polite" aria-atomic="true"></div>
+    </div>
+
+    <script src="./app.js"></script>
+  </body>
+</html>

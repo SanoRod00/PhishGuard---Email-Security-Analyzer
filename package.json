@@ -1,0 +1,14 @@
+{
+  "name": "phishguard-email-security-analyzer",
+  "version": "1.0.0",
+  "description": "PhishGuard helps users inspect suspicious URLs and sender emails before they click.",
+  "private": true,
+  "type": "commonjs",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node server.js"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

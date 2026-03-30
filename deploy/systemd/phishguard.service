@@ -1,0 +1,16 @@
+[Unit]
+Description=PhishGuard Email Security Analyzer
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/phishguard
+ExecStart=/usr/bin/node /opt/phishguard/server.js
+Restart=always
+RestartSec=5
+EnvironmentFile=/opt/phishguard/.env
+User=www-data
+Group=www-data
+
+[Install]
+WantedBy=multi-user.target
