@@ -579,12 +579,15 @@ summary {
 }
 
 .checkbox-label {
-  justify-content: end;
+  flex-direction: row;
+  align-items: center;
+  gap: 0.7rem;
+  margin-top: 1.9rem;
 }
 
 .checkbox-label input {
   width: auto;
-  margin-right: 0.6rem;
+  margin: 0;
 }
 
 .table-wrap {

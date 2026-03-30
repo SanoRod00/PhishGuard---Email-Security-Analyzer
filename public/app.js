@@ -375,15 +375,14 @@ function renderHistoryTable() {
     )
     .join("");
 
-  renderMetrics(filteredRecords);
+  renderMetrics();
 }
 
-function renderMetrics(filteredRecords = getFilteredHistory()) {
-  const source = filteredRecords.length ? filteredRecords : state.history;
-  const dangerous = source.filter((record) => record.threatLevel === "dangerous").length;
-  const disposable = source.filter((record) => record.disposable).length;
+function renderMetrics() {
+  const dangerous = state.history.filter((record) => record.threatLevel === "dangerous").length;
+  const disposable = state.history.filter((record) => record.disposable).length;
 
-  elements.totalScansMetric.textContent = String(source.length);
+  elements.totalScansMetric.textContent = String(state.history.length);
   elements.dangerScansMetric.textContent = String(dangerous);
   elements.disposableMetric.textContent = String(disposable);
 }
