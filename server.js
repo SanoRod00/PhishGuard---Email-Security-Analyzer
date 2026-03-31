@@ -9,6 +9,11 @@ loadEnvFile(path.join(ROOT_DIR, ".env"));
 
 const HOST = process.env.HOST || "127.0.0.1";
 const PORT = Number(process.env.PORT || 3000);
+const STATIC_CACHE_CONTROL = "public, max-age=0, must-revalidate";
+const SCAN_CACHE_TTL_MS = {
+  url: 10 * 60 * 1000,
+  email: 10 * 60 * 1000
+};
 const MIME_TYPES = {
   ".css": "text/css; charset=utf-8",
   ".html": "text/html; charset=utf-8",
@@ -22,6 +27,9 @@ const RISK_RANK = {
   suspicious: 2,
   dangerous: 3
 };
+const scanCache = new Map();
+const inFlightScans = new Map();
+const staticAssetCache = new Map();
 
 class AppError extends Error {
   constructor(statusCode, message, details = {}) {
@@ -133,6 +141,54 @@ function delay(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+function clonePayload(payload) {
+  if (typeof structuredClone === "function") {
+    return structuredClone(payload);
+  }
+
+  return JSON.parse(JSON.stringify(payload));
+}
+
+function pruneExpiredEntries(store) {
+  const now = Date.now();
+
+  for (const [key, entry] of store.entries()) {
+    if (entry.expiresAt <= now) {
+      store.delete(key);
+    }
+  }
+}
+
+async function withCache(cacheKey, ttlMs, resolver) {
+  pruneExpiredEntries(scanCache);
+
+  const cachedEntry = scanCache.get(cacheKey);
+  if (cachedEntry && cachedEntry.expiresAt > Date.now()) {
+    return clonePayload(cachedEntry.value);
+  }
+
+  if (inFlightScans.has(cacheKey)) {
+    return clonePayload(await inFlightScans.get(cacheKey));
+  }
+
+  const task = (async () => {
+    const value = await resolver();
+    scanCache.set(cacheKey, {
+      value,
+      expiresAt: Date.now() + ttlMs
+    });
+    return value;
+  })();
+
+  inFlightScans.set(cacheKey, task);
+
+  try {
+    return clonePayload(await task);
+  } finally {
+    inFlightScans.delete(cacheKey);
+  }
+}
+
 function severityFromScore(score) {
   if (score >= 70) {
     return "dangerous";
@@ -212,93 +268,99 @@ function vtHeaders() {
 }
 
 async function analyzeUrl(targetUrl) {
-  const submitResponse = await fetchJson("https://www.virustotal.com/api/v3/urls", {
-    method: "POST",
-    headers: {
-      ...vtHeaders(),
-      "content-type": "application/x-www-form-urlencoded"
-    },
-    body: new URLSearchParams({ url: targetUrl }).toString()
-  });
-
-  const analysisId = submitResponse?.data?.id;
-  if (!analysisId) {
-    throw new AppError(502, "VirusTotal did not return an analysis identifier.");
-  }
-
-  let analysisPayload = null;
-  for (let attempt = 0; attempt < 5; attempt += 1) {
-    if (attempt > 0) {
-      await delay(1200);
-    }
-
-    analysisPayload = await fetchJson(
-      `https://www.virustotal.com/api/v3/analyses/${analysisId}`,
-      { headers: vtHeaders() }
-    );
-
-    if (analysisPayload?.data?.attributes?.status === "completed") {
-      break;
-    }
-  }
-
-  const attributes = analysisPayload?.data?.attributes || {};
-  const stats = attributes.stats || {};
-  const detections = Object.entries(attributes.results || {})
-    .map(([vendor, result]) => {
-      const category = result?.category || "";
-      return {
-        vendor,
-        category,
-        result: result?.result || category || "no verdict",
-        detected: category === "malicious" || category === "suspicious",
-        method: result?.method || "unknown"
-      };
-    })
-    .sort((left, right) => {
-      if (Number(right.detected) !== Number(left.detected)) {
-        return Number(right.detected) - Number(left.detected);
-      }
-      return left.vendor.localeCompare(right.vendor);
+  const cachedResult = await withCache(`url:${targetUrl}`, SCAN_CACHE_TTL_MS.url, async () => {
+    const submitResponse = await fetchJson("https://www.virustotal.com/api/v3/urls", {
+      method: "POST",
+      headers: {
+        ...vtHeaders(),
+        "content-type": "application/x-www-form-urlencoded"
+      },
+      body: new URLSearchParams({ url: targetUrl }).toString()
     });
 
-  const malicious = Number(stats.malicious || 0);
-  const suspicious = Number(stats.suspicious || 0);
-  const harmless = Number(stats.harmless || 0);
-  const undetected = Number(stats.undetected || 0);
-  const positives = malicious + suspicious;
-  const total = malicious + suspicious + harmless + undetected || detections.length;
-  const threatScore = clamp(total ? Math.round((positives / total) * 100) : 0, 0, 100);
-  const status = attributes.status === "completed" ? "completed" : "pending";
-  const threatLevel = status === "pending" ? "suspicious" : severityFromScore(threatScore);
-  const topFindings = detections
-    .filter((item) => item.detected)
-    .slice(0, 5)
-    .map((item) => `${item.vendor}: ${item.result}`);
+    const analysisId = submitResponse?.data?.id;
+    if (!analysisId) {
+      throw new AppError(502, "VirusTotal did not return an analysis identifier.");
+    }
+
+    let analysisPayload = null;
+    for (let attempt = 0; attempt < 5; attempt += 1) {
+      if (attempt > 0) {
+        await delay(1200);
+      }
+
+      analysisPayload = await fetchJson(
+        `https://www.virustotal.com/api/v3/analyses/${analysisId}`,
+        { headers: vtHeaders() }
+      );
+
+      if (analysisPayload?.data?.attributes?.status === "completed") {
+        break;
+      }
+    }
+
+    const attributes = analysisPayload?.data?.attributes || {};
+    const stats = attributes.stats || {};
+    const detections = Object.entries(attributes.results || {})
+      .map(([vendor, result]) => {
+        const category = result?.category || "";
+        return {
+          vendor,
+          category,
+          result: result?.result || category || "no verdict",
+          detected: category === "malicious" || category === "suspicious",
+          method: result?.method || "unknown"
+        };
+      })
+      .sort((left, right) => {
+        if (Number(right.detected) !== Number(left.detected)) {
+          return Number(right.detected) - Number(left.detected);
+        }
+        return left.vendor.localeCompare(right.vendor);
+      });
+
+    const malicious = Number(stats.malicious || 0);
+    const suspicious = Number(stats.suspicious || 0);
+    const harmless = Number(stats.harmless || 0);
+    const undetected = Number(stats.undetected || 0);
+    const positives = malicious + suspicious;
+    const total = malicious + suspicious + harmless + undetected || detections.length;
+    const threatScore = clamp(total ? Math.round((positives / total) * 100) : 0, 0, 100);
+    const status = attributes.status === "completed" ? "completed" : "pending";
+    const threatLevel = status === "pending" ? "suspicious" : severityFromScore(threatScore);
+    const topFindings = detections
+      .filter((item) => item.detected)
+      .slice(0, 5)
+      .map((item) => `${item.vendor}: ${item.result}`);
+
+    return {
+      type: "url",
+      target: targetUrl,
+      status,
+      positives,
+      total,
+      threatScore,
+      threatLevel,
+      stats: {
+        malicious,
+        suspicious,
+        harmless,
+        undetected
+      },
+      detections,
+      highlights: topFindings,
+      summary:
+        status === "pending"
+          ? "VirusTotal accepted the URL and is still processing the analysis."
+          : positives > 0
+            ? `${positives} of ${total} vendors flagged this URL.`
+            : `No vendor flagged this URL out of ${total} checks.`
+    };
+  });
 
   return {
-    type: "url",
-    target: targetUrl,
-    scannedAt: new Date().toISOString(),
-    status,
-    positives,
-    total,
-    threatScore,
-    threatLevel,
-    stats: {
-      malicious,
-      suspicious,
-      harmless,
-      undetected
-    },
-    detections,
-    highlights: topFindings,
-    summary:
-      status === "pending"
-        ? "VirusTotal accepted the URL and is still processing the analysis."
-        : positives > 0
-          ? `${positives} of ${total} vendors flagged this URL.`
-          : `No vendor flagged this URL out of ${total} checks.`
+    ...cachedResult,
+    scannedAt: new Date().toISOString()
   };
 }
 
@@ -363,84 +425,96 @@ function computeEmailHeuristics(email) {
 }
 
 async function analyzeEmail(senderEmail) {
-  const [disifyResult, abstractResult] = await Promise.all([
-    checkDisify(senderEmail),
-    validateWithAbstract(senderEmail)
-  ]);
+  const cachedResult = await withCache(
+    `email:${senderEmail}`,
+    SCAN_CACHE_TTL_MS.email,
+    async () => {
+      const [disifyResult, abstractResult] = await Promise.all([
+        checkDisify(senderEmail),
+        validateWithAbstract(senderEmail)
+      ]);
 
-  const heuristicResult = computeEmailHeuristics(senderEmail);
-  const flags = [];
-  let trustScore = 100;
+      const heuristicResult = computeEmailHeuristics(senderEmail);
+      const flags = [];
+      let trustScore = 100;
 
-  if (!disifyResult.format) {
-    flags.push("Email format is invalid.");
-    trustScore -= 35;
-  }
+      if (!disifyResult.format) {
+        flags.push("Email format is invalid.");
+        trustScore -= 35;
+      }
 
-  if (!disifyResult.dns) {
-    flags.push("Sender domain has no healthy DNS response.");
-    trustScore -= 25;
-  }
+      if (!disifyResult.dns) {
+        flags.push("Sender domain has no healthy DNS response.");
+        trustScore -= 25;
+      }
 
-  if (disifyResult.disposable) {
-    flags.push("Disposable inbox provider detected.");
-    trustScore -= 55;
-  }
+      if (disifyResult.disposable) {
+        flags.push("Disposable inbox provider detected.");
+        trustScore -= 55;
+      }
 
-  if (abstractResult) {
-    if (!abstractResult.isValidFormat) {
-      flags.push("Abstract API marked the address format as invalid.");
-      trustScore -= 40;
+      if (abstractResult) {
+        if (!abstractResult.isValidFormat) {
+          flags.push("Abstract API marked the address format as invalid.");
+          trustScore -= 40;
+        }
+
+        if (abstractResult.isDisposableEmail) {
+          flags.push("Abstract API marked the address as disposable.");
+          trustScore -= 35;
+        }
+
+        if (abstractResult.deliverability === "UNDELIVERABLE") {
+          flags.push("Mailbox is marked undeliverable.");
+          trustScore -= 35;
+        } else if (abstractResult.deliverability === "RISKY") {
+          flags.push("Mailbox deliverability is risky.");
+          trustScore -= 18;
+        }
+
+        if (!Number.isNaN(abstractResult.qualityScore)) {
+          trustScore = Math.round((trustScore + abstractResult.qualityScore * 100) / 2);
+        }
+      } else {
+        flags.push(
+          "Abstract deliverability checks are unavailable until ABSTRACT_API_KEY is configured."
+        );
+      }
+
+      for (const signal of heuristicResult.signals) {
+        flags.push(signal);
+      }
+      trustScore -= heuristicResult.penalty;
+
+      trustScore = clamp(trustScore, 0, 100);
+      const threatLevel = trustToThreatLevel(trustScore);
+      const disposable = disifyResult.disposable || Boolean(abstractResult?.isDisposableEmail);
+
+      return {
+        type: "email",
+        target: senderEmail,
+        domain: disifyResult.domain,
+        trustScore,
+        threatLevel,
+        disposable,
+        flags,
+        summary:
+          threatLevel === "dangerous"
+            ? "The sender address shows multiple phishing indicators."
+            : threatLevel === "suspicious"
+              ? "The sender address needs extra verification before you trust it."
+              : "No strong phishing indicators were found for this sender address.",
+        checks: {
+          disify: disifyResult,
+          abstract: abstractResult
+        }
+      };
     }
-
-    if (abstractResult.isDisposableEmail) {
-      flags.push("Abstract API marked the address as disposable.");
-      trustScore -= 35;
-    }
-
-    if (abstractResult.deliverability === "UNDELIVERABLE") {
-      flags.push("Mailbox is marked undeliverable.");
-      trustScore -= 35;
-    } else if (abstractResult.deliverability === "RISKY") {
-      flags.push("Mailbox deliverability is risky.");
-      trustScore -= 18;
-    }
-
-    if (!Number.isNaN(abstractResult.qualityScore)) {
-      trustScore = Math.round((trustScore + abstractResult.qualityScore * 100) / 2);
-    }
-  } else {
-    flags.push("Abstract deliverability checks are unavailable until ABSTRACT_API_KEY is configured.");
-  }
-
-  for (const signal of heuristicResult.signals) {
-    flags.push(signal);
-  }
-  trustScore -= heuristicResult.penalty;
-
-  trustScore = clamp(trustScore, 0, 100);
-  const threatLevel = trustToThreatLevel(trustScore);
-  const disposable = disifyResult.disposable || Boolean(abstractResult?.isDisposableEmail);
+  );
 
   return {
-    type: "email",
-    target: senderEmail,
-    scannedAt: new Date().toISOString(),
-    domain: disifyResult.domain,
-    trustScore,
-    threatLevel,
-    disposable,
-    flags,
-    summary:
-      threatLevel === "dangerous"
-        ? "The sender address shows multiple phishing indicators."
-        : threatLevel === "suspicious"
-          ? "The sender address needs extra verification before you trust it."
-          : "No strong phishing indicators were found for this sender address.",
-    checks: {
-      disify: disifyResult,
-      abstract: abstractResult
-    }
+    ...cachedResult,
+    scannedAt: new Date().toISOString()
   };
 }
 
@@ -470,14 +544,35 @@ async function serveStaticAsset(req, res, pathname) {
   }
 
   try {
-    const fileBuffer = await fs.promises.readFile(filePath);
+    const stats = await fs.promises.stat(filePath);
     const extension = path.extname(filePath).toLowerCase();
-    sendText(
-      res,
-      200,
-      fileBuffer,
-      MIME_TYPES[extension] || "application/octet-stream"
-    );
+    const etag = `W/"${stats.size}-${Math.trunc(stats.mtimeMs)}"`;
+    let cachedAsset = staticAssetCache.get(filePath);
+
+    if (!cachedAsset || cachedAsset.etag !== etag) {
+      cachedAsset = {
+        body: await fs.promises.readFile(filePath),
+        etag,
+        contentType: MIME_TYPES[extension] || "application/octet-stream"
+      };
+      staticAssetCache.set(filePath, cachedAsset);
+    }
+
+    if (req.headers["if-none-match"] === cachedAsset.etag) {
+      res.writeHead(304, {
+        ETag: cachedAsset.etag,
+        "Cache-Control": STATIC_CACHE_CONTROL
+      });
+      res.end();
+      return;
+    }
+
+    res.writeHead(200, {
+      "Content-Type": cachedAsset.contentType,
+      "Cache-Control": STATIC_CACHE_CONTROL,
+      ETag: cachedAsset.etag
+    });
+    res.end(cachedAsset.body);
   } catch (error) {
     if (error.code === "ENOENT") {
       throw new AppError(404, "Not found.");

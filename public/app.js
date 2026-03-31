@@ -1,9 +1,19 @@
 const STORAGE_KEY = "phishguard.history.v1";
+const HISTORY_LIMIT = 100;
+const SEARCH_DEBOUNCE_MS = 120;
+const DATE_TIME_FORMATTER = new Intl.DateTimeFormat(undefined, {
+  year: "numeric",
+  month: "short",
+  day: "2-digit",
+  hour: "2-digit",
+  minute: "2-digit"
+});
 const SEVERITY_ORDER = {
   safe: 1,
   suspicious: 2,
   dangerous: 3
 };
+const activeRequests = new Map();
 
 const state = {
   history: loadHistory(),
@@ -11,6 +21,7 @@ const state = {
   latestEmailResult: null,
   latestCombinedResult: null
 };
+let historyRenderTimeout = 0;
 
 const elements = {
   urlForm: document.getElementById("urlScanForm"),
@@ -50,8 +61,9 @@ function bindEvents() {
   elements.exportBtn.addEventListener("click", exportHistory);
   elements.clearHistoryBtn.addEventListener("click", clearHistory);
 
+  elements.searchInput.addEventListener("input", scheduleHistoryRender);
+
   [
-    elements.searchInput,
     elements.sortSelect,
     elements.threatFilter,
     elements.typeFilter,
@@ -76,12 +88,17 @@ async function handleUrlScan(event) {
   setLoading(elements.urlScanBtn, true);
 
   try {
-    const result = await requestJson("/api/scan/url", { url });
+    const result = await runRequest("url", (signal) =>
+      requestJson("/api/scan/url", { url }, { signal })
+    );
     state.latestUrlResult = result;
     renderUrlResult(result);
     pushHistory(createHistoryRecord("url", result));
     showToast(result.summary, result.threatLevel);
   } catch (error) {
+    if (error.name === "AbortError") {
+      return;
+    }
     showToast(error.message, "error");
   } finally {
     setLoading(elements.urlScanBtn, false);
@@ -100,12 +117,17 @@ async function handleEmailScan(event) {
   setLoading(elements.emailScanBtn, true);
 
   try {
-    const result = await requestJson("/api/scan/email", { email });
+    const result = await runRequest("email", (signal) =>
+      requestJson("/api/scan/email", { email }, { signal })
+    );
     state.latestEmailResult = result;
     renderEmailResult(result);
     pushHistory(createHistoryRecord("email", result));
     showToast(result.summary, result.threatLevel);
   } catch (error) {
+    if (error.name === "AbortError") {
+      return;
+    }
     showToast(error.message, "error");
   } finally {
     setLoading(elements.emailScanBtn, false);
@@ -129,7 +151,9 @@ async function handleCombinedScan() {
   setLoading(elements.combinedScanBtn, true);
 
   try {
-    const result = await requestJson("/api/scan/combined", { url, email });
+    const result = await runRequest("combined", (signal) =>
+      requestJson("/api/scan/combined", { url, email }, { signal })
+    );
     state.latestCombinedResult = result;
     state.latestUrlResult = result.url;
     state.latestEmailResult = result.email;
@@ -139,6 +163,9 @@ async function handleCombinedScan() {
     pushHistory(createHistoryRecord("combined", result));
     showToast("Combined scan completed.", result.threatLevel);
   } catch (error) {
+    if (error.name === "AbortError") {
+      return;
+    }
     showToast(error.message, "error");
   } finally {
     setLoading(elements.combinedScanBtn, false);
@@ -355,7 +382,6 @@ function renderHistoryTable() {
   if (!filteredRecords.length) {
     elements.historyTableBody.innerHTML =
       '<tr><td colspan="7" class="table-empty">No scans match the current filters.</td></tr>';
-    renderMetrics();
     return;
   }
 
@@ -374,8 +400,6 @@ function renderHistoryTable() {
       `
     )
     .join("");
-
-  renderMetrics();
 }
 
 function renderMetrics() {
@@ -494,7 +518,7 @@ function createHistoryRecord(type, result) {
 }
 
 function pushHistory(record) {
-  state.history = [record, ...state.history].slice(0, 100);
+  state.history = [record, ...state.history].slice(0, HISTORY_LIMIT);
   saveHistory();
   renderAll();
 }
@@ -551,13 +575,14 @@ function exportHistory() {
   showToast("CSV export created from the current filtered view.", "safe");
 }
 
-async function requestJson(url, payload) {
+async function requestJson(url, payload, options = {}) {
   const response = await fetch(url, {
     method: "POST",
     headers: {
       "Content-Type": "application/json"
     },
-    body: JSON.stringify(payload)
+    body: JSON.stringify(payload),
+    signal: options.signal
   });
 
   const data = await response.json().catch(() => ({}));
@@ -573,7 +598,7 @@ function loadHistory() {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     const parsed = JSON.parse(raw || "[]");
-    return Array.isArray(parsed) ? parsed : [];
+    return Array.isArray(parsed) ? parsed.slice(0, HISTORY_LIMIT) : [];
   } catch (error) {
     return [];
   }
@@ -585,6 +610,7 @@ function saveHistory() {
 
 function setLoading(button, active) {
   button.disabled = active;
+  button.setAttribute("aria-busy", String(active));
   button.classList.toggle("is-loading", active);
 }
 
@@ -593,6 +619,10 @@ function showToast(message, tone = "safe") {
   toast.className = `toast ${tone}`;
   toast.textContent = message;
   elements.toastHost.appendChild(toast);
+
+  while (elements.toastHost.childElementCount > 4) {
+    elements.toastHost.firstElementChild?.remove();
+  }
 
   window.setTimeout(() => {
     toast.remove();
@@ -604,7 +634,7 @@ function gaugeMarkup({ value, label, valueSuffix = "", tone }) {
     tone === "dangerous"
       ? "var(--danger-red)"
       : tone === "suspicious"
-        ? "var(--warning-yellow)"
+        ? "var(--warning-amber)"
         : "var(--safe-green)";
 
   return `
@@ -650,14 +680,7 @@ function trustTone(score) {
 }
 
 function formatDateTime(value) {
-  const date = new Date(value);
-  return new Intl.DateTimeFormat(undefined, {
-    year: "numeric",
-    month: "short",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit"
-  }).format(date);
+  return DATE_TIME_FORMATTER.format(new Date(value));
 }
 
 function highlightMatch(value, query) {
@@ -701,5 +724,27 @@ function safeHostname(value) {
     return new URL(value).hostname;
   } catch (error) {
     return value;
+  }
+}
+
+function scheduleHistoryRender() {
+  window.clearTimeout(historyRenderTimeout);
+  historyRenderTimeout = window.setTimeout(() => {
+    renderHistoryTable();
+  }, SEARCH_DEBOUNCE_MS);
+}
+
+async function runRequest(key, execute) {
+  activeRequests.get(key)?.abort();
+
+  const controller = new AbortController();
+  activeRequests.set(key, controller);
+
+  try {
+    return await execute(controller.signal);
+  } finally {
+    if (activeRequests.get(key) === controller) {
+      activeRequests.delete(key);
+    }
   }
 }

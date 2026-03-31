@@ -11,63 +11,107 @@
     <link rel="stylesheet" href="./styles.css" />
   </head>
   <body>
-    <div class="aurora aurora-left"></div>
-    <div class="aurora aurora-right"></div>
+    <div class="page-glow glow-left"></div>
+    <div class="page-glow glow-right"></div>
 
     <div class="app-shell">
       <header class="hero panel">
-        <div class="brand-row">
-          <div class="brand-mark">PG</div>
-          <div>
-            <p class="eyebrow">PhishGuard</p>
-            <h1>Scan before you click</h1>
+        <div class="hero-topbar">
+          <div class="brand-row">
+            <div class="brand-mark">PG</div>
+            <div class="brand-copy">
+              <p class="eyebrow">PhishGuard</p>
+              <span class="brand-subtitle">Email Security Analyzer</span>
+            </div>
           </div>
+          <div class="hero-tag">Fast phishing triage for links and senders</div>
         </div>
 
         <div class="hero-grid">
           <div class="hero-copy">
+            <p class="eyebrow">Inbox Review Desk</p>
+            <h1>Check the link, validate the sender, and decide faster.</h1>
             <p class="lede">
-              Inspect suspicious URLs and sender addresses with a layered phishing workflow
-              before you trust the message.
+              A lightweight review screen for suspicious emails. Run URL and sender checks from
+              one page, keep local history in the browser, and get a clear risk summary without
+              extra clutter.
             </p>
-
-            <div class="disclaimer">
-              No email contents are stored on the server. Only scan metadata stays in your own
-              browser history for review and export.
-            </div>
 
             <div class="hero-actions">
               <button id="combinedScanBtn" class="button button-primary">
-                Run combined scan
+                Run complete review
               </button>
-              <a class="button button-secondary" href="#historySection">Review history</a>
+              <a class="button button-secondary" href="#historySection">Open case history</a>
+            </div>
+
+            <div class="hero-notes">
+              <article class="note-card">
+                <span class="note-label">Privacy</span>
+                <p>Only API calls leave the browser. History stays in local storage on this device.</p>
+              </article>
+              <article class="note-card">
+                <span class="note-label">Workflow</span>
+                <p>Review URL reputation, sender trust, then keep one combined case summary.</p>
+              </article>
             </div>
           </div>
 
           <aside class="overview-card">
-            <p class="eyebrow">Live posture</p>
-            <div class="overview-metrics">
+            <div class="overview-heading">
               <div>
-                <span class="metric-value" id="totalScansMetric">0</span>
-                <span class="metric-label">Total scans</span>
+                <p class="eyebrow">Live Posture</p>
+                <h2>Current review queue</h2>
               </div>
-              <div>
-                <span class="metric-value" id="dangerScansMetric">0</span>
-                <span class="metric-label">Dangerous</span>
-              </div>
-              <div>
-                <span class="metric-value" id="disposableMetric">0</span>
-                <span class="metric-label">Disposable hits</span>
-              </div>
+              <span class="pill pill-neutral">Local session</span>
             </div>
+
+            <div class="overview-metrics">
+              <article class="metric-card">
+                <span class="metric-label">Total scans</span>
+                <strong class="metric-value" id="totalScansMetric">0</strong>
+              </article>
+              <article class="metric-card">
+                <span class="metric-label">Dangerous</span>
+                <strong class="metric-value" id="dangerScansMetric">0</strong>
+              </article>
+              <article class="metric-card">
+                <span class="metric-label">Disposable</span>
+                <strong class="metric-value" id="disposableMetric">0</strong>
+              </article>
+            </div>
+
             <div id="combinedSummary" class="combined-summary">
-              Combined scan results will appear here after you run both checks together.
+              Run the complete review when both a link and sender address are available.
             </div>
           </aside>
         </div>
       </header>
 
       <main>
+        <section class="workflow-strip panel">
+          <article class="workflow-step">
+            <span class="step-index">01</span>
+            <div>
+              <h2>Inspect the URL</h2>
+              <p>Check vendor detections and suspicious verdicts from VirusTotal.</p>
+            </div>
+          </article>
+          <article class="workflow-step">
+            <span class="step-index">02</span>
+            <div>
+              <h2>Validate the sender</h2>
+              <p>Review deliverability, disposable inbox signals, and sender heuristics.</p>
+            </div>
+          </article>
+          <article class="workflow-step">
+            <span class="step-index">03</span>
+            <div>
+              <h2>Keep a local case trail</h2>
+              <p>Search, sort, and export previous investigations directly from the browser.</p>
+            </div>
+          </article>
+        </section>
+
         <section class="scanner-grid">
           <article class="panel scanner-panel">
             <div class="panel-heading">
@@ -77,6 +121,11 @@
               </div>
               <span class="pill pill-neutral">VirusTotal</span>
             </div>
+
+            <p class="panel-copy">
+              Paste the suspicious destination and get a clean reputation summary with the most
+              relevant vendor detections surfaced first.
+            </p>
 
             <form id="urlScanForm" class="scan-form">
               <label for="urlInput">Suspicious URL</label>
@@ -94,8 +143,8 @@
                 </button>
               </div>
               <p class="helper-text">
-                Threat score is based on vendor detections, suspicious verdicts, and rate-limit
-                aware reporting.
+                Best for shortened links, fake login pages, invoice portals, or attachment landing
+                pages.
               </p>
             </form>
 
@@ -113,6 +162,11 @@
               <span class="pill pill-neutral">Disify + Abstract</span>
             </div>
 
+            <p class="panel-copy">
+              Evaluate whether the sender looks legitimate before anyone replies, clicks, or shares
+              credentials.
+            </p>
+
             <form id="emailScanForm" class="scan-form">
               <label for="emailInput">Sender email address</label>
               <div class="field-row">
@@ -129,8 +183,8 @@
                 </button>
               </div>
               <p class="helper-text">
-                Trust score combines disposable detection, deliverability checks, and sender
-                pattern heuristics.
+                Trust scoring blends disposable detection, deliverability status, and high-risk
+                sender patterns.
               </p>
             </form>
 
@@ -153,18 +207,18 @@
             </div>
           </article>
 
-          <article class="panel">
+          <article class="panel guidance-panel">
             <div class="panel-heading">
               <div>
-                <p class="eyebrow">Privacy</p>
-                <h2>Data handling</h2>
+                <p class="eyebrow">Review Guide</p>
+                <h2>What matters most</h2>
               </div>
             </div>
             <ul class="privacy-list">
-              <li>API keys stay server-side in `.env`.</li>
-              <li>Only HTTPS upstream calls are used for scanning.</li>
-              <li>Scan history is stored locally in browser `localStorage` only.</li>
-              <li>Exported CSV files are generated on demand in the browser.</li>
+              <li>Start with the combined review when both the link and sender are available.</li>
+              <li>Dangerous URL scores and disposable senders should be escalated immediately.</li>
+              <li>API keys stay on the server in `.env` and never enter browser storage.</li>
+              <li>Export only the filtered case view you need for incident follow-up.</li>
             </ul>
           </article>
         </section>
@@ -173,7 +227,7 @@
           <div class="panel-heading">
             <div>
               <p class="eyebrow">Feature 3</p>
-              <h2>Scan History Dashboard</h2>
+              <h2>Case History</h2>
             </div>
             <div class="history-actions">
               <button id="clearHistoryBtn" class="button button-secondary">Clear history</button>
@@ -186,7 +240,7 @@
               <input
                 id="searchInput"
                 type="search"
-                placeholder="Search by URL, email, or domain"
+                placeholder="Search by URL, email, domain, or summary"
                 autocomplete="off"
               />
             </label>
