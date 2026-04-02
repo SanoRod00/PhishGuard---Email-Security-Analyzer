@@ -37,7 +37,9 @@ PhishGuard is a protected email-review workspace for suspicious URLs and sender 
 ## Local Setup
 
 1. Copy `.env.example` to `.env`.
-2. Configure PostgreSQL and update `DATABASE_URL`.
+2. Choose a storage mode:
+   - For quick local development, leave `STORAGE_DRIVER=memory`.
+   - For persistent auth data, set `STORAGE_DRIVER=postgres`, configure PostgreSQL, and update `DATABASE_URL`.
 3. Set strong values for:
    - `JWT_SECRET`
    - `JWT_REFRESH_SECRET`
@@ -49,7 +51,7 @@ PhishGuard is a protected email-review workspace for suspicious URLs and sender 
 npm install
 ```
 
-6. Apply the authentication schema:
+6. If you are using PostgreSQL, apply the authentication schema:
 
 ```bash
 npm run migrate:auth
@@ -102,6 +104,8 @@ npm start
 npm run migrate:auth
 npm test
 ```
+
+`npm run migrate:auth` is only needed when `STORAGE_DRIVER=postgres`.
 
 ## Database Files
 

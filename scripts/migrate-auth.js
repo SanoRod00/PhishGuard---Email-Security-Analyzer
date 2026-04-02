@@ -5,7 +5,7 @@ const { buildConfig, assertRuntimeConfig, ROOT_DIR } = require("../src/config");
 
 async function main() {
   const config = buildConfig();
-  assertRuntimeConfig(config);
+  assertRuntimeConfig(config, { requireDatabase: true });
 
   const sql = fs.readFileSync(
     path.join(ROOT_DIR, "db", "migrations", "001_auth_schema.sql"),

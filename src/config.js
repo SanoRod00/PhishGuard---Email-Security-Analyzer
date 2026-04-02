@@ -46,12 +46,14 @@ function buildConfig(overrides = {}) {
   const isProduction = nodeEnv === "production";
   const host = env.HOST || "127.0.0.1";
   const port = Number(env.PORT || 3000);
+  const storageDriver = env.STORAGE_DRIVER || (env.DATABASE_URL ? "postgres" : "memory");
 
   return {
     nodeEnv,
     isProduction,
     host,
     port,
+    storageDriver,
     frontendUrl: env.FRONTEND_URL || `http://${host}:${port}`,
     databaseUrl: env.DATABASE_URL || "",
     jwtSecret: env.JWT_SECRET || "",
@@ -69,12 +71,22 @@ function buildConfig(overrides = {}) {
   };
 }
 
-function assertRuntimeConfig(config) {
-  const required = ["databaseUrl", "jwtSecret", "jwtRefreshSecret", "frontendUrl"];
+function assertRuntimeConfig(config, options = {}) {
+  const requireDatabase = options.requireDatabase ?? config.storageDriver === "postgres";
+  const required = ["jwtSecret", "jwtRefreshSecret", "frontendUrl"];
+
+  if (requireDatabase) {
+    required.unshift("databaseUrl");
+  }
+
   const missing = required.filter((key) => !config[key]);
 
   if (missing.length) {
     throw new Error(`Missing required environment variables: ${missing.join(", ")}`);
+  }
+
+  if (!["memory", "postgres"].includes(config.storageDriver)) {
+    throw new Error("STORAGE_DRIVER must be either \"memory\" or \"postgres\".");
   }
 }
 
