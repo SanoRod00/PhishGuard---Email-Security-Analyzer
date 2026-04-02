@@ -1,5 +1,3 @@
-const GUEST_HISTORY_STORAGE_KEY = "phishguard.history.guest.v2";
-const SETTINGS_STORAGE_KEY = "phishguard.settings.v1";
 const HISTORY_LIMIT = 150;
 const SEARCH_DEBOUNCE_MS = 120;
 const DEFAULT_SETTINGS = {
@@ -25,20 +23,61 @@ const SEVERITY_ORDER = {
   suspicious: 2,
   dangerous: 3
 };
-const activeRequests = new Map();
+const PASSWORD_COMPLEXITY_REGEX =
+  /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[^A-Za-z\d]).{8,}$/;
 
 const state = {
+  csrfToken: "",
+  accessToken: "",
+  accessTokenExpiresAt: "",
   user: null,
-  history: loadGuestHistory(),
-  settings: loadLocalSettings(),
+  settings: { ...DEFAULT_SETTINGS },
+  history: [],
   latestUrlResult: null,
   latestEmailResult: null,
   latestCombinedResult: null,
-  authMode: "login"
+  refreshTimeoutId: 0,
+  refreshPromise: null,
+  activeAuthView: "login",
+  routePath: window.location.pathname,
+  verificationHandled: false,
+  historyRenderTimeout: 0
 };
-let historyRenderTimeout = 0;
 
 const elements = {
+  authShell: document.getElementById("authShell"),
+  protectedApp: document.getElementById("protectedApp"),
+  dashboardView: document.getElementById("dashboardView"),
+  profileView: document.getElementById("profileView"),
+  siteNav: document.getElementById("siteNav"),
+  routeLinks: document.querySelectorAll("[data-route-link]"),
+  routeActions: document.querySelectorAll("[data-route-action]"),
+  authTabs: document.querySelectorAll("[data-auth-view]"),
+  authAlert: document.getElementById("authAlert"),
+  authInfoCard: document.getElementById("authInfoCard"),
+  headerStatus: document.getElementById("headerStatus"),
+  logoutBtn: document.getElementById("logoutBtn"),
+  loginForm: document.getElementById("loginForm"),
+  registerForm: document.getElementById("registerForm"),
+  forgotPasswordForm: document.getElementById("forgotPasswordForm"),
+  resetPasswordForm: document.getElementById("resetPasswordForm"),
+  loginEmail: document.getElementById("loginEmail"),
+  loginPassword: document.getElementById("loginPassword"),
+  rememberMe: document.getElementById("rememberMe"),
+  loginSubmitBtn: document.getElementById("loginSubmitBtn"),
+  registerFirstName: document.getElementById("registerFirstName"),
+  registerLastName: document.getElementById("registerLastName"),
+  registerEmail: document.getElementById("registerEmail"),
+  registerPassword: document.getElementById("registerPassword"),
+  registerPasswordConfirm: document.getElementById("registerPasswordConfirm"),
+  registerSubmitBtn: document.getElementById("registerSubmitBtn"),
+  passwordMeterFill: document.getElementById("passwordMeterFill"),
+  passwordStrengthLabel: document.getElementById("passwordStrengthLabel"),
+  forgotEmail: document.getElementById("forgotEmail"),
+  forgotSubmitBtn: document.getElementById("forgotSubmitBtn"),
+  resetPassword: document.getElementById("resetPassword"),
+  resetPasswordConfirm: document.getElementById("resetPasswordConfirm"),
+  resetSubmitBtn: document.getElementById("resetSubmitBtn"),
   urlForm: document.getElementById("urlScanForm"),
   emailForm: document.getElementById("emailScanForm"),
   urlInput: document.getElementById("urlInput"),
@@ -64,23 +103,12 @@ const elements = {
   totalScansMetric: document.getElementById("totalScansMetric"),
   dangerScansMetric: document.getElementById("dangerScansMetric"),
   disposableMetric: document.getElementById("disposableMetric"),
-  headerStatus: document.getElementById("headerStatus"),
-  sessionSummary: document.getElementById("sessionSummary"),
-  loginModeBtn: document.getElementById("loginModeBtn"),
-  registerModeBtn: document.getElementById("registerModeBtn"),
-  authForm: document.getElementById("authForm"),
-  authNameField: document.getElementById("authNameField"),
-  authNameInput: document.getElementById("authNameInput"),
-  authEmailInput: document.getElementById("authEmailInput"),
-  authPasswordInput: document.getElementById("authPasswordInput"),
-  authSubmitBtn: document.getElementById("authSubmitBtn"),
-  signOutBtn: document.getElementById("signOutBtn"),
-  settingsForm: document.getElementById("settingsForm"),
   displayNameInput: document.getElementById("displayNameInput"),
   settingsThreatFilter: document.getElementById("settingsThreatFilter"),
   settingsTimelineLength: document.getElementById("settingsTimelineLength"),
   settingsDashboardRange: document.getElementById("settingsDashboardRange"),
   settingsDisposableOnly: document.getElementById("settingsDisposableOnly"),
+  settingsForm: document.getElementById("settingsForm"),
   settingsSaveBtn: document.getElementById("settingsSaveBtn"),
   settingsStatus: document.getElementById("settingsStatus"),
   analyticsSummary: document.getElementById("analyticsSummary"),
@@ -89,30 +117,65 @@ const elements = {
   activityChart: document.getElementById("activityChart"),
   analyticsRangeLabel: document.getElementById("analyticsRangeLabel"),
   domainLeaderboard: document.getElementById("domainLeaderboard"),
-  personalInsight: document.getElementById("personalInsight")
+  personalInsight: document.getElementById("personalInsight"),
+  profileCardName: document.getElementById("profileCardName"),
+  profileCardEmail: document.getElementById("profileCardEmail"),
+  profileFirstName: document.getElementById("profileFirstName"),
+  profileLastName: document.getElementById("profileLastName"),
+  profileCreatedAt: document.getElementById("profileCreatedAt"),
+  verificationBadge: document.getElementById("verificationBadge"),
+  profilePageName: document.getElementById("profilePageName"),
+  profilePageEmail: document.getElementById("profilePageEmail"),
+  profilePageId: document.getElementById("profilePageId"),
+  profilePageVerified: document.getElementById("profilePageVerified"),
+  profilePageCreatedAt: document.getElementById("profilePageCreatedAt"),
+  profilePageUpdatedAt: document.getElementById("profilePageUpdatedAt")
 };
 
 bindEvents();
-setAuthMode("login");
-populateSettingsForm();
-applyDefaultFilters();
 renderAll();
-void initializeSession();
+void initializeApp();
 
 function bindEvents() {
+  window.addEventListener("popstate", () => {
+    state.routePath = window.location.pathname;
+    renderRoute();
+  });
+
+  elements.authTabs.forEach((element) => {
+    element.addEventListener("click", () => {
+      const view = element.dataset.authView;
+      navigateTo(authPathForView(view));
+    });
+  });
+
+  elements.routeLinks.forEach((element) => {
+    element.addEventListener("click", (event) => {
+      event.preventDefault();
+      navigateTo(element.getAttribute("href"));
+    });
+  });
+
+  elements.routeActions.forEach((element) => {
+    element.addEventListener("click", () => {
+      navigateTo(element.dataset.routeAction);
+    });
+  });
+
+  elements.loginForm.addEventListener("submit", handleLogin);
+  elements.registerForm.addEventListener("submit", handleRegister);
+  elements.forgotPasswordForm.addEventListener("submit", handleForgotPassword);
+  elements.resetPasswordForm.addEventListener("submit", handleResetPassword);
+  elements.logoutBtn.addEventListener("click", handleLogout);
+  elements.registerPassword.addEventListener("input", renderPasswordStrength);
+  elements.settingsForm.addEventListener("submit", handleSettingsSave);
   elements.urlForm.addEventListener("submit", handleUrlScan);
   elements.emailForm.addEventListener("submit", handleEmailScan);
   elements.combinedScanBtn.addEventListener("click", handleCombinedScan);
-  elements.exportBtn.addEventListener("click", exportHistory);
   elements.clearHistoryBtn.addEventListener("click", clearHistory);
-  elements.authForm.addEventListener("submit", handleAuthSubmit);
-  elements.signOutBtn.addEventListener("click", handleSignOut);
-  elements.settingsForm.addEventListener("submit", handleSettingsSave);
-  elements.loginModeBtn.addEventListener("click", () => setAuthMode("login"));
-  elements.registerModeBtn.addEventListener("click", () => setAuthMode("register"));
+  elements.exportBtn.addEventListener("click", exportHistory);
 
   elements.searchInput.addEventListener("input", scheduleHistoryRender);
-
   [
     elements.sortSelect,
     elements.threatFilter,
@@ -126,41 +189,250 @@ function bindEvents() {
   });
 }
 
-async function initializeSession() {
+async function initializeApp() {
+  await bootstrapCsrf();
+  renderRoute();
+
+  if (isVerificationRoute() && !state.verificationHandled) {
+    state.verificationHandled = true;
+    await handleVerificationRoute();
+    return;
+  }
+
+  const restored = await refreshSession().catch(() => false);
+  if (restored) {
+    await loadProtectedData();
+  }
+
+  renderAll();
+}
+
+async function bootstrapCsrf() {
   try {
-    const session = await requestJson("/api/session", null, { method: "GET" });
-    if (session.authenticated) {
-      await applyAuthenticatedWorkspace(session, { syncGuestHistory: true });
-      showToast(`Welcome back, ${getViewerName()}.`, "safe");
-    }
+    const response = await fetch("/api/auth/csrf", {
+      method: "GET",
+      credentials: "same-origin"
+    });
+    const payload = await response.json().catch(() => ({}));
+    state.csrfToken = payload.csrfToken || "";
   } catch (error) {
-    showToast("Saved session could not be restored.", "error");
+    showAuthAlert("Unable to initialize CSRF protection. Refresh the page and try again.", "error");
+  }
+}
+
+async function handleLogin(event) {
+  event.preventDefault();
+  hideAuthAlert();
+  setLoading(elements.loginSubmitBtn, true);
+
+  try {
+    const payload = await apiRequest("/api/auth/login", {
+      method: "POST",
+      body: {
+        email: elements.loginEmail.value.trim(),
+        password: elements.loginPassword.value,
+        rememberMe: elements.rememberMe.checked
+      },
+      includeAuth: false
+    });
+
+    acceptSession(payload);
+    await loadProtectedData();
+    navigateTo("/app", { replace: true });
+    showToast("Signed in successfully.", "safe");
+  } catch (error) {
+    showAuthAlert(error.message);
+  } finally {
+    setLoading(elements.loginSubmitBtn, false);
+  }
+}
+
+async function handleRegister(event) {
+  event.preventDefault();
+  hideAuthAlert();
+
+  const password = elements.registerPassword.value;
+  const confirm = elements.registerPasswordConfirm.value;
+
+  if (password !== confirm) {
+    showAuthAlert("Password confirmation does not match.");
+    return;
+  }
+
+  if (!PASSWORD_COMPLEXITY_REGEX.test(password)) {
+    showAuthAlert(
+      "Password must be at least 8 characters and include uppercase, lowercase, number, and special character."
+    );
+    return;
+  }
+
+  setLoading(elements.registerSubmitBtn, true);
+
+  try {
+    const payload = await apiRequest("/api/auth/register", {
+      method: "POST",
+      body: {
+        firstName: elements.registerFirstName.value.trim(),
+        lastName: elements.registerLastName.value.trim(),
+        email: elements.registerEmail.value.trim(),
+        password
+      },
+      includeAuth: false
+    });
+
+    elements.registerForm.reset();
+    renderPasswordStrength();
+    navigateTo("/login", { replace: true });
+    showAuthAlert(payload.message, "success");
+  } catch (error) {
+    showAuthAlert(error.message);
+  } finally {
+    setLoading(elements.registerSubmitBtn, false);
+  }
+}
+
+async function handleForgotPassword(event) {
+  event.preventDefault();
+  hideAuthAlert();
+  setLoading(elements.forgotSubmitBtn, true);
+
+  try {
+    const payload = await apiRequest("/api/auth/forgot-password", {
+      method: "POST",
+      body: {
+        email: elements.forgotEmail.value.trim()
+      },
+      includeAuth: false
+    });
+
+    showAuthAlert(payload.message, "success");
+    elements.forgotPasswordForm.reset();
+  } catch (error) {
+    showAuthAlert(error.message);
+  } finally {
+    setLoading(elements.forgotSubmitBtn, false);
+  }
+}
+
+async function handleResetPassword(event) {
+  event.preventDefault();
+  hideAuthAlert();
+  const token = readRouteToken("token");
+
+  if (!token) {
+    showAuthAlert("Password reset token is missing from the link.");
+    return;
+  }
+
+  if (elements.resetPassword.value !== elements.resetPasswordConfirm.value) {
+    showAuthAlert("Password confirmation does not match.");
+    return;
+  }
+
+  setLoading(elements.resetSubmitBtn, true);
+
+  try {
+    const payload = await apiRequest("/api/auth/reset-password", {
+      method: "POST",
+      body: {
+        token,
+        password: elements.resetPassword.value
+      },
+      includeAuth: false
+    });
+
+    elements.resetPasswordForm.reset();
+    navigateTo("/login", { replace: true });
+    showAuthAlert(payload.message, "success");
+  } catch (error) {
+    showAuthAlert(error.message);
+  } finally {
+    setLoading(elements.resetSubmitBtn, false);
+  }
+}
+
+async function handleVerificationRoute() {
+  hideAuthAlert();
+  const token = readRouteToken("token");
+
+  if (!token) {
+    showAuthAlert("Verification token is missing from the link.");
+    return;
+  }
+
+  showAuthAlert("Verifying your email address...", "success");
+
+  try {
+    const payload = await apiRequest("/api/auth/verify-email", {
+      method: "POST",
+      body: { token },
+      includeAuth: false
+    });
+    navigateTo("/login", { replace: true });
+    showAuthAlert(payload.message, "success");
+  } catch (error) {
+    showAuthAlert(error.message);
+  }
+}
+
+async function handleLogout() {
+  setLoading(elements.logoutBtn, true);
+
+  try {
+    await apiRequest("/api/auth/logout", {
+      method: "POST",
+      body: {}
+    });
+  } catch (error) {
+    showToast(error.message, "error");
+  } finally {
+    clearSession();
+    setLoading(elements.logoutBtn, false);
+    navigateTo("/login", { replace: true });
+    showAuthAlert("You have been signed out.", "success");
+  }
+}
+
+async function handleSettingsSave(event) {
+  event.preventDefault();
+  setLoading(elements.settingsSaveBtn, true);
+
+  try {
+    const response = await apiRequest("/api/settings", {
+      method: "PUT",
+      body: readSettingsForm()
+    });
+
+    state.settings = normalizeSettings(response.settings);
+    populateSettingsForm();
+    applySettingsToFilters();
+    renderAll();
+    elements.settingsStatus.textContent = "Preferences saved to your authenticated account.";
+    showToast("Preferences saved.", "safe");
+  } catch (error) {
+    showToast(error.message, "error");
+  } finally {
+    setLoading(elements.settingsSaveBtn, false);
   }
 }
 
 async function handleUrlScan(event) {
   event.preventDefault();
-  const url = elements.urlInput.value.trim();
-
-  if (!isValidUrl(url)) {
-    showToast("Please enter a valid URL.", "error");
+  if (!ensureAuthenticated()) {
     return;
   }
 
   setLoading(elements.urlScanBtn, true);
-
   try {
-    const result = await runRequest("url", (signal) =>
-      requestJson("/api/scan/url", { url }, { signal })
-    );
+    const result = await apiRequest("/api/scan/url", {
+      method: "POST",
+      body: { url: elements.urlInput.value.trim() }
+    });
     state.latestUrlResult = result;
     renderUrlResult(result);
-    await pushHistory(createHistoryRecord("url", result));
+    await addHistoryRecord(createHistoryRecord("url", result));
     showToast(result.summary, result.threatLevel);
   } catch (error) {
-    if (error.name === "AbortError") {
-      return;
-    }
     showToast(error.message, "error");
   } finally {
     setLoading(elements.urlScanBtn, false);
@@ -169,27 +441,21 @@ async function handleUrlScan(event) {
 
 async function handleEmailScan(event) {
   event.preventDefault();
-  const email = elements.emailInput.value.trim();
-
-  if (!isValidEmail(email)) {
-    showToast("Please enter a valid email address.", "error");
+  if (!ensureAuthenticated()) {
     return;
   }
 
   setLoading(elements.emailScanBtn, true);
-
   try {
-    const result = await runRequest("email", (signal) =>
-      requestJson("/api/scan/email", { email }, { signal })
-    );
+    const result = await apiRequest("/api/scan/email", {
+      method: "POST",
+      body: { email: elements.emailInput.value.trim() }
+    });
     state.latestEmailResult = result;
     renderEmailResult(result);
-    await pushHistory(createHistoryRecord("email", result));
+    await addHistoryRecord(createHistoryRecord("email", result));
     showToast(result.summary, result.threatLevel);
   } catch (error) {
-    if (error.name === "AbortError") {
-      return;
-    }
     showToast(error.message, "error");
   } finally {
     setLoading(elements.emailScanBtn, false);
@@ -197,164 +463,233 @@ async function handleEmailScan(event) {
 }
 
 async function handleCombinedScan() {
-  const url = elements.urlInput.value.trim();
-  const email = elements.emailInput.value.trim();
-
-  if (!isValidUrl(url)) {
-    showToast("Add a valid URL before running the combined scan.", "error");
-    return;
-  }
-
-  if (!isValidEmail(email)) {
-    showToast("Add a valid sender email before running the combined scan.", "error");
+  if (!ensureAuthenticated()) {
     return;
   }
 
   setLoading(elements.combinedScanBtn, true);
-
   try {
-    const result = await runRequest("combined", (signal) =>
-      requestJson("/api/scan/combined", { url, email }, { signal })
-    );
+    const result = await apiRequest("/api/scan/combined", {
+      method: "POST",
+      body: {
+        url: elements.urlInput.value.trim(),
+        email: elements.emailInput.value.trim()
+      }
+    });
     state.latestCombinedResult = result;
     state.latestUrlResult = result.url;
     state.latestEmailResult = result.email;
     renderUrlResult(result.url);
     renderEmailResult(result.email);
     renderCombinedSummary(result);
-    await pushHistory(createHistoryRecord("combined", result));
+    await addHistoryRecord(createHistoryRecord("combined", result));
     showToast("Combined scan completed.", result.threatLevel);
   } catch (error) {
-    if (error.name === "AbortError") {
-      return;
-    }
     showToast(error.message, "error");
   } finally {
     setLoading(elements.combinedScanBtn, false);
   }
 }
 
-async function handleAuthSubmit(event) {
-  event.preventDefault();
-  const mode = state.authMode;
-  const payload = {
-    email: elements.authEmailInput.value.trim(),
-    password: elements.authPasswordInput.value
-  };
+async function addHistoryRecord(record) {
+  const response = await apiRequest("/api/history", {
+    method: "POST",
+    body: { record }
+  });
 
-  if (mode === "register") {
-    payload.name = elements.authNameInput.value.trim();
-    if (!payload.name) {
-      showToast("Add a display name to create an account.", "error");
-      return;
-    }
-  }
-
-  setLoading(elements.authSubmitBtn, true);
-
-  try {
-    const session = await requestJson(
-      mode === "register" ? "/api/auth/register" : "/api/auth/login",
-      payload
-    );
-    await applyAuthenticatedWorkspace(session, {
-      syncGuestHistory: true,
-      syncLocalSettings: mode === "register"
-    });
-    elements.authForm.reset();
-    setAuthMode("login");
-    showToast(mode === "register" ? "Account created and workspace synced." : "Signed in successfully.", "safe");
-  } catch (error) {
-    showToast(error.message, "error");
-  } finally {
-    setLoading(elements.authSubmitBtn, false);
-  }
-}
-
-async function handleSignOut() {
-  setLoading(elements.signOutBtn, true);
-
-  try {
-    await requestJson("/api/auth/logout", {});
-    state.user = null;
-    state.history = loadGuestHistory();
-    state.settings = loadLocalSettings();
-    populateSettingsForm();
-    applyDefaultFilters();
-    renderAll();
-    showToast("Signed out. Guest workspace restored.", "safe");
-  } catch (error) {
-    showToast(error.message, "error");
-  } finally {
-    setLoading(elements.signOutBtn, false);
-  }
-}
-
-async function handleSettingsSave(event) {
-  event.preventDefault();
-  const settings = readSettingsForm();
-
-  state.settings = settings;
-  saveLocalSettings();
-  applyDefaultFilters();
+  state.history = normalizeHistoryList([response.record, ...state.history]);
   renderAll();
+}
 
-  if (!state.user) {
-    elements.settingsStatus.textContent = "Saved in this browser. Sign in to sync these preferences.";
-    showToast("Preferences saved locally.", "safe");
+async function clearHistory() {
+  try {
+    await apiRequest("/api/history", {
+      method: "DELETE",
+      body: {}
+    });
+    state.history = [];
+    renderAll();
+    showToast("History cleared.", "safe");
+  } catch (error) {
+    showToast(error.message, "error");
+  }
+}
+
+function exportHistory() {
+  const records = getFilteredHistory();
+  if (!records.length) {
+    showToast("No rows are available to export.", "error");
     return;
   }
 
-  setLoading(elements.settingsSaveBtn, true);
+  const header = [
+    "timestamp",
+    "type",
+    "target",
+    "domain",
+    "threat_level",
+    "threat_score",
+    "disposable",
+    "summary"
+  ];
 
-  try {
-    const response = await requestJson("/api/settings", settings);
-    state.settings = normalizeSettings(response.settings);
-    saveLocalSettings();
-    populateSettingsForm();
-    renderAll();
-    elements.settingsStatus.textContent = "Preferences sync to your account automatically.";
-    showToast("Preferences saved to your account.", "safe");
-  } catch (error) {
-    showToast(error.message, "error");
-  } finally {
-    setLoading(elements.settingsSaveBtn, false);
-  }
+  const rows = records.map((record) => [
+    record.timestamp,
+    record.type,
+    record.target,
+    record.domain || "",
+    record.threatLevel,
+    record.threatScore,
+    record.disposable ? "yes" : "no",
+    record.summary
+  ]);
+
+  const csv = [header, ...rows]
+    .map((row) => row.map((value) => `"${String(value).replaceAll('"', '""')}"`).join(","))
+    .join("\n");
+
+  const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = `phishguard-history-${new Date().toISOString().slice(0, 10)}.csv`;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
 }
 
-async function applyAuthenticatedWorkspace(session, options = {}) {
-  state.user = session.user;
-  state.settings = normalizeSettings(session.settings);
-  state.history = normalizeHistoryList(session.history);
+async function loadProtectedData() {
+  const payload = await apiRequest("/api/bootstrap", {
+    method: "GET"
+  });
 
-  if (options.syncLocalSettings && hasCustomizedSettings(loadLocalSettings())) {
-    try {
-      const updated = await requestJson("/api/settings", loadLocalSettings());
-      state.settings = normalizeSettings(updated.settings);
-    } catch (error) {
-      showToast("Account created, but local preferences could not be synced yet.", "suspicious");
-    }
-  }
-
-  const guestHistory = loadGuestHistory();
-  if (options.syncGuestHistory && guestHistory.length) {
-    try {
-      const syncResponse = await requestJson("/api/history/sync", { records: guestHistory });
-      state.history = normalizeHistoryList(syncResponse.history);
-      localStorage.removeItem(GUEST_HISTORY_STORAGE_KEY);
-    } catch (error) {
-      showToast("Signed in, but guest history could not be synced yet.", "suspicious");
-    }
-  }
-
-  saveLocalSettings();
+  state.user = payload.user;
+  state.settings = normalizeSettings(payload.settings);
+  state.history = normalizeHistoryList(payload.history);
   populateSettingsForm();
-  applyDefaultFilters();
+  applySettingsToFilters();
   renderAll();
 }
 
+function acceptSession(payload) {
+  state.accessToken = payload.accessToken;
+  state.accessTokenExpiresAt = payload.accessTokenExpiresAt;
+  state.csrfToken = payload.csrfToken || state.csrfToken;
+  if (payload.user) {
+    state.user = payload.user;
+  }
+  scheduleTokenRefresh();
+}
+
+function clearSession() {
+  state.accessToken = "";
+  state.accessTokenExpiresAt = "";
+  state.user = null;
+  state.history = [];
+  state.settings = { ...DEFAULT_SETTINGS };
+  state.latestUrlResult = null;
+  state.latestEmailResult = null;
+  state.latestCombinedResult = null;
+  window.clearTimeout(state.refreshTimeoutId);
+  renderAll();
+}
+
+async function refreshSession() {
+  if (state.refreshPromise) {
+    return state.refreshPromise;
+  }
+
+  state.refreshPromise = (async () => {
+    try {
+      const payload = await apiRequest("/api/auth/refresh", {
+        method: "POST",
+        body: {},
+        includeAuth: false,
+        retryOn401: false
+      });
+      acceptSession(payload);
+      return true;
+    } catch (error) {
+      clearSession();
+      return false;
+    } finally {
+      state.refreshPromise = null;
+    }
+  })();
+
+  return state.refreshPromise;
+}
+
+function scheduleTokenRefresh() {
+  window.clearTimeout(state.refreshTimeoutId);
+
+  if (!state.accessTokenExpiresAt) {
+    return;
+  }
+
+  const expiresAt = new Date(state.accessTokenExpiresAt).getTime();
+  const delay = Math.max(5_000, expiresAt - Date.now() - 60_000);
+
+  state.refreshTimeoutId = window.setTimeout(() => {
+    void refreshSession().then(async (restored) => {
+      if (restored) {
+        await loadProtectedData();
+      } else {
+        navigateTo("/login", { replace: true });
+        showAuthAlert("Your session expired. Sign in again.");
+      }
+    });
+  }, delay);
+}
+
+async function apiRequest(path, options = {}) {
+  const method = options.method || "GET";
+  const headers = {
+    "Content-Type": "application/json"
+  };
+
+  if (state.csrfToken && method !== "GET") {
+    headers["x-csrf-token"] = state.csrfToken;
+  }
+
+  if (options.includeAuth !== false && state.accessToken) {
+    headers.authorization = `Bearer ${state.accessToken}`;
+  }
+
+  const response = await fetch(path, {
+    method,
+    credentials: "same-origin",
+    headers,
+    body: method === "GET" ? undefined : JSON.stringify(options.body || {})
+  });
+
+  const payload = await response.json().catch(() => ({}));
+
+  if (response.status === 401 && options.retryOn401 !== false && options.includeAuth !== false) {
+    const restored = await refreshSession();
+    if (restored) {
+      return apiRequest(path, {
+        ...options,
+        retryOn401: false
+      });
+    }
+
+    navigateTo("/login", { replace: true });
+    showAuthAlert("Your session expired. Sign in again.");
+  }
+
+  if (!response.ok) {
+    throw new Error(payload.error || "Request failed.");
+  }
+
+  return payload;
+}
+
 function renderAll() {
-  renderWorkspace();
+  renderRoute();
+  renderHeader();
+  renderProfile();
   renderUrlResult(state.latestUrlResult);
   renderEmailResult(state.latestEmailResult);
   renderCombinedSummary(state.latestCombinedResult);
@@ -364,34 +699,72 @@ function renderAll() {
   renderAnalytics();
 }
 
-function renderWorkspace() {
-  const viewerName = getViewerName();
+function renderRoute() {
+  const pathname = window.location.pathname;
+  state.routePath = pathname;
 
-  if (state.user) {
-    elements.headerStatus.textContent = `${viewerName} synced workspace`;
-    elements.sessionSummary.innerHTML = `
-      <strong>${escapeHtml(viewerName)}</strong>
-      <p>${escapeHtml(state.user.email)}</p>
-      <span class="timeline-meta">History and preferences are stored in your account.</span>
-    `;
-    elements.authForm.hidden = true;
-    elements.loginModeBtn.hidden = true;
-    elements.registerModeBtn.hidden = true;
-    elements.signOutBtn.hidden = false;
-    elements.settingsStatus.textContent = "Preferences sync to your account automatically.";
-  } else {
-    elements.headerStatus.textContent = "Guest workspace";
-    elements.sessionSummary.innerHTML = `
-      <strong>Guest session</strong>
-      <p>Scans and preferences stay in this browser until you sign in.</p>
-      <span class="timeline-meta">Create an account to keep your investigation history synced.</span>
-    `;
-    elements.authForm.hidden = false;
-    elements.loginModeBtn.hidden = false;
-    elements.registerModeBtn.hidden = false;
-    elements.signOutBtn.hidden = true;
-    elements.settingsStatus.textContent = "Guest preferences are stored locally.";
+  if (!state.user && isProtectedPath(pathname)) {
+    setAuthView("login");
+    elements.authShell.hidden = false;
+    elements.protectedApp.hidden = true;
+    elements.siteNav.hidden = true;
+    elements.logoutBtn.hidden = true;
+    return;
   }
+
+  if (state.user && isPublicPath(pathname)) {
+    navigateTo("/app", { replace: true });
+    return;
+  }
+
+  elements.authShell.hidden = Boolean(state.user);
+  elements.protectedApp.hidden = !state.user;
+  elements.siteNav.hidden = !state.user;
+  elements.logoutBtn.hidden = !state.user;
+  elements.dashboardView.hidden = pathname === "/profile";
+  elements.profileView.hidden = pathname !== "/profile";
+
+  if (!state.user) {
+    setAuthView(viewFromPath(pathname));
+  }
+
+  elements.routeLinks.forEach((element) => {
+    element.classList.toggle("is-active", element.dataset.routeLink === pathname);
+  });
+}
+
+function renderHeader() {
+  if (!state.user) {
+    elements.headerStatus.textContent = "Authentication required";
+    return;
+  }
+
+  const displayName = state.settings.displayName || `${state.user.firstName} ${state.user.lastName}`.trim();
+  elements.headerStatus.textContent = `${displayName} authenticated`;
+}
+
+function renderProfile() {
+  if (!state.user) {
+    return;
+  }
+
+  const displayName = state.settings.displayName || `${state.user.firstName} ${state.user.lastName}`.trim();
+  const verificationText = state.user.isVerified ? "Verified account" : "Verification pending";
+
+  elements.profileCardName.textContent = displayName || state.user.email;
+  elements.profileCardEmail.textContent = state.user.email;
+  elements.profileFirstName.textContent = state.user.firstName;
+  elements.profileLastName.textContent = state.user.lastName;
+  elements.profileCreatedAt.textContent = formatDateTime(state.user.createdAt);
+  elements.verificationBadge.textContent = verificationText;
+  elements.verificationBadge.className = `pill ${state.user.isVerified ? "pill-safe" : "pill-suspicious"}`;
+
+  elements.profilePageName.textContent = displayName || state.user.email;
+  elements.profilePageEmail.textContent = state.user.email;
+  elements.profilePageId.textContent = state.user.id;
+  elements.profilePageVerified.textContent = verificationText;
+  elements.profilePageCreatedAt.textContent = formatDateTime(state.user.createdAt);
+  elements.profilePageUpdatedAt.textContent = formatDateTime(state.user.updatedAt);
 }
 
 function renderUrlResult(result) {
@@ -660,31 +1033,6 @@ function renderAnalytics() {
   renderPersonalInsight(recentHistory, counts);
 }
 
-function analyticsCardMarkup(label, value, copy) {
-  return `
-    <article class="metric-card analytics-card">
-      <span class="metric-label">${escapeHtml(label)}</span>
-      <strong class="metric-value">${escapeHtml(String(value))}</strong>
-      <p>${escapeHtml(copy)}</p>
-    </article>
-  `;
-}
-
-function breakdownRowMarkup(label, value, total, tone) {
-  const ratio = total ? Math.round((value / total) * 100) : 0;
-  return `
-    <div class="breakdown-row">
-      <div class="breakdown-copy">
-        <strong>${escapeHtml(label)}</strong>
-        <span>${value} (${ratio}%)</span>
-      </div>
-      <div class="breakdown-track">
-        <span class="breakdown-fill breakdown-${tone}" style="width: ${ratio}%"></span>
-      </div>
-    </div>
-  `;
-}
-
 function renderActivityChart(records) {
   const now = new Date();
   const points = [];
@@ -699,7 +1047,6 @@ function renderActivityChart(records) {
       (record) => record.timestamp.slice(0, 10) === key && record.threatLevel === "dangerous"
     ).length;
     points.push({
-      key,
       label: DAY_LABEL_FORMATTER.format(day),
       count,
       dangerous
@@ -711,12 +1058,11 @@ function renderActivityChart(records) {
   elements.activityChart.innerHTML = points
     .map((point) => {
       const height = point.count ? Math.max(12, Math.round((point.count / maxCount) * 100)) : 6;
-      const dangerClass = point.dangerous ? " is-danger" : "";
       return `
         <div class="activity-column">
           <span class="activity-count">${point.count}</span>
           <div class="activity-bar-shell">
-            <span class="activity-bar${dangerClass}" style="height: ${height}%"></span>
+            <span class="activity-bar${point.dangerous ? " is-danger" : ""}" style="height: ${height}%"></span>
           </div>
           <span class="activity-label">${escapeHtml(point.label)}</span>
         </div>
@@ -770,7 +1116,7 @@ function renderDomainLeaderboard(records) {
 function renderPersonalInsight(records, counts) {
   if (!records.length) {
     elements.personalInsight.textContent =
-      "Once you build a scan history, this dashboard will highlight what deserves attention first.";
+      "Once authenticated scans accumulate, this dashboard highlights what deserves attention first.";
     return;
   }
 
@@ -831,8 +1177,7 @@ function getFilteredHistory() {
 }
 
 function getRecentHistoryWindow() {
-  const now = new Date();
-  const cutoff = new Date(now);
+  const cutoff = new Date();
   cutoff.setHours(0, 0, 0, 0);
   cutoff.setDate(cutoff.getDate() - (state.settings.dashboardRangeDays - 1));
 
@@ -859,6 +1204,80 @@ function sortRecords(left, right, sortValue) {
     default:
       return new Date(right.timestamp) - new Date(left.timestamp);
   }
+}
+
+function setAuthView(view) {
+  state.activeAuthView = view;
+  elements.authTabs.forEach((element) => {
+    element.classList.toggle("is-active", element.dataset.authView === view);
+  });
+  elements.loginForm.hidden = view !== "login";
+  elements.registerForm.hidden = view !== "register";
+  elements.forgotPasswordForm.hidden = view !== "forgot";
+  elements.resetPasswordForm.hidden = view !== "reset";
+}
+
+function showAuthAlert(message, tone = "error") {
+  elements.authAlert.hidden = false;
+  elements.authAlert.textContent = message;
+  elements.authAlert.className = `auth-alert ${tone}`;
+}
+
+function hideAuthAlert() {
+  elements.authAlert.hidden = true;
+  elements.authAlert.textContent = "";
+  elements.authAlert.className = "auth-alert";
+}
+
+function renderPasswordStrength() {
+  const password = elements.registerPassword.value || "";
+  const score = passwordStrengthScore(password);
+  const width = [8, 32, 58, 82, 100][score];
+  const labels = [
+    "Use 8+ characters with upper, lower, number, and special character.",
+    "Very weak password.",
+    "Weak password. Add more variety.",
+    "Decent password. Add a little more length.",
+    "Strong password.",
+    "Very strong password."
+  ];
+
+  elements.passwordMeterFill.style.width = `${width}%`;
+  elements.passwordMeterFill.className = `password-meter-fill strength-${score}`;
+  elements.passwordStrengthLabel.textContent = labels[score];
+}
+
+function passwordStrengthScore(password) {
+  let score = 0;
+  if (password.length >= 8) score += 1;
+  if (/[a-z]/.test(password) && /[A-Z]/.test(password)) score += 1;
+  if (/\d/.test(password)) score += 1;
+  if (/[^A-Za-z\d]/.test(password)) score += 1;
+  if (password.length >= 12) score += 1;
+  return score;
+}
+
+function populateSettingsForm() {
+  elements.displayNameInput.value = state.settings.displayName;
+  elements.settingsThreatFilter.value = state.settings.defaultThreatFilter;
+  elements.settingsTimelineLength.value = String(state.settings.timelineLength);
+  elements.settingsDashboardRange.value = String(state.settings.dashboardRangeDays);
+  elements.settingsDisposableOnly.checked = state.settings.disposableOnly;
+}
+
+function readSettingsForm() {
+  return {
+    displayName: elements.displayNameInput.value.trim(),
+    defaultThreatFilter: elements.settingsThreatFilter.value,
+    timelineLength: Number(elements.settingsTimelineLength.value),
+    dashboardRangeDays: Number(elements.settingsDashboardRange.value),
+    disposableOnly: elements.settingsDisposableOnly.checked
+  };
+}
+
+function applySettingsToFilters() {
+  elements.threatFilter.value = state.settings.defaultThreatFilter;
+  elements.disposableOnly.checked = state.settings.disposableOnly;
 }
 
 function createHistoryRecord(type, result) {
@@ -903,133 +1322,38 @@ function createHistoryRecord(type, result) {
   };
 }
 
-async function pushHistory(record) {
-  state.history = normalizeHistoryList([record, ...state.history]);
-  persistGuestHistory();
-  renderAll();
-
-  if (!state.user) {
-    return;
-  }
-
-  try {
-    const response = await requestJson("/api/history/append", { record });
-    state.history = normalizeHistoryList(response.history);
-    renderAll();
-  } catch (error) {
-    showToast("Saved in the browser, but account sync is currently unavailable.", "suspicious");
-  }
-}
-
-async function clearHistory() {
-  if (!state.user) {
-    state.history = [];
-    persistGuestHistory();
-    renderAll();
-    showToast("Guest scan history cleared.", "safe");
-    return;
-  }
-
-  try {
-    await requestJson("/api/history/clear", {});
-    state.history = [];
-    renderAll();
-    showToast("Account scan history cleared.", "safe");
-  } catch (error) {
-    showToast(error.message, "error");
-  }
-}
-
-function exportHistory() {
-  const records = getFilteredHistory();
-  if (!records.length) {
-    showToast("No rows are available to export.", "error");
-    return;
-  }
-
-  const header = [
-    "timestamp",
-    "type",
-    "target",
-    "domain",
-    "threat_level",
-    "threat_score",
-    "disposable",
-    "summary"
-  ];
-
-  const rows = records.map((record) => [
-    record.timestamp,
-    record.type,
-    record.target,
-    record.domain || "",
-    record.threatLevel,
-    record.threatScore,
-    record.disposable ? "yes" : "no",
-    record.summary
-  ]);
-
-  const csv = [header, ...rows]
-    .map((row) => row.map((value) => `"${String(value).replaceAll('"', '""')}"`).join(","))
-    .join("\n");
-
-  const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement("a");
-  link.href = url;
-  link.download = `phishguard-history-${new Date().toISOString().slice(0, 10)}.csv`;
-  document.body.appendChild(link);
-  link.click();
-  link.remove();
-  URL.revokeObjectURL(url);
-  showToast("CSV export created from the current filtered view.", "safe");
-}
-
-async function requestJson(url, payload, options = {}) {
-  const method = options.method || "POST";
-  const response = await fetch(url, {
-    method,
-    headers: {
-      "Content-Type": "application/json"
-    },
-    body: method === "GET" ? undefined : JSON.stringify(payload || {}),
-    signal: options.signal
-  });
-
-  const data = await response.json().catch(() => ({}));
-
-  if (!response.ok) {
-    throw new Error(data.error || "Request failed.");
-  }
-
-  return data;
-}
-
-function loadGuestHistory() {
-  try {
-    return normalizeHistoryList(JSON.parse(localStorage.getItem(GUEST_HISTORY_STORAGE_KEY) || "[]"));
-  } catch (error) {
+function normalizeHistoryList(records) {
+  if (!Array.isArray(records)) {
     return [];
   }
-}
 
-function persistGuestHistory() {
-  if (state.user) {
-    return;
+  const deduped = new Map();
+
+  for (const record of records) {
+    const normalized = {
+      id: String(record.id || createRecordId()).slice(0, 120),
+      type: ["url", "email", "combined"].includes(record.type) ? record.type : "url",
+      target: String(record.target || "").trim().slice(0, 320),
+      domain: String(record.domain || "").trim().slice(0, 120),
+      threatLevel: ["safe", "suspicious", "dangerous"].includes(record.threatLevel)
+        ? record.threatLevel
+        : "safe",
+      threatScore: clampNumber(record.threatScore, 0, 100, 0),
+      disposable: Boolean(record.disposable),
+      summary: String(record.summary || "").trim().slice(0, 240),
+      timestamp: normalizeTimestamp(record.timestamp)
+    };
+
+    if (!normalized.target || !normalized.summary) {
+      continue;
+    }
+
+    deduped.set(normalized.id, normalized);
   }
-  localStorage.setItem(GUEST_HISTORY_STORAGE_KEY, JSON.stringify(state.history));
-}
 
-function loadLocalSettings() {
-  try {
-    return normalizeSettings(JSON.parse(localStorage.getItem(SETTINGS_STORAGE_KEY) || "{}"));
-  } catch (error) {
-    return normalizeSettings(DEFAULT_SETTINGS);
-  }
-}
-
-function saveLocalSettings() {
-  localStorage.setItem(SETTINGS_STORAGE_KEY, JSON.stringify(state.settings));
+  return [...deduped.values()]
+    .sort((left, right) => new Date(right.timestamp) - new Date(left.timestamp))
+    .slice(0, HISTORY_LIMIT);
 }
 
 function normalizeSettings(input = {}) {
@@ -1049,91 +1373,29 @@ function normalizeSettings(input = {}) {
   };
 }
 
-function normalizeHistoryList(records) {
-  if (!Array.isArray(records)) {
-    return [];
-  }
-
-  const deduped = new Map();
-
-  for (const rawRecord of records) {
-    const record = {
-      id: String(rawRecord.id || createRecordId()).slice(0, 120),
-      type: ["url", "email", "combined"].includes(rawRecord.type) ? rawRecord.type : "url",
-      target: String(rawRecord.target || "").trim().slice(0, 320),
-      domain: String(rawRecord.domain || "").trim().slice(0, 120),
-      threatLevel: ["safe", "suspicious", "dangerous"].includes(rawRecord.threatLevel)
-        ? rawRecord.threatLevel
-        : "safe",
-      threatScore: clampNumber(rawRecord.threatScore, 0, 100, 0),
-      disposable: Boolean(rawRecord.disposable),
-      summary: String(rawRecord.summary || "").trim().slice(0, 240),
-      timestamp: normalizeTimestamp(rawRecord.timestamp)
-    };
-
-    if (!record.target || !record.summary) {
-      continue;
-    }
-
-    deduped.set(record.id, record);
-  }
-
-  return [...deduped.values()]
-    .sort((left, right) => new Date(right.timestamp) - new Date(left.timestamp))
-    .slice(0, HISTORY_LIMIT);
+function analyticsCardMarkup(label, value, copy) {
+  return `
+    <article class="metric-card analytics-card">
+      <span class="metric-label">${escapeHtml(label)}</span>
+      <strong class="metric-value">${escapeHtml(String(value))}</strong>
+      <p>${escapeHtml(copy)}</p>
+    </article>
+  `;
 }
 
-function populateSettingsForm() {
-  elements.displayNameInput.value = state.settings.displayName;
-  elements.settingsThreatFilter.value = state.settings.defaultThreatFilter;
-  elements.settingsTimelineLength.value = String(state.settings.timelineLength);
-  elements.settingsDashboardRange.value = String(state.settings.dashboardRangeDays);
-  elements.settingsDisposableOnly.checked = state.settings.disposableOnly;
-}
-
-function readSettingsForm() {
-  return normalizeSettings({
-    displayName: elements.displayNameInput.value,
-    defaultThreatFilter: elements.settingsThreatFilter.value,
-    timelineLength: Number(elements.settingsTimelineLength.value),
-    dashboardRangeDays: Number(elements.settingsDashboardRange.value),
-    disposableOnly: elements.settingsDisposableOnly.checked
-  });
-}
-
-function applyDefaultFilters() {
-  elements.threatFilter.value = state.settings.defaultThreatFilter;
-  elements.disposableOnly.checked = state.settings.disposableOnly;
-}
-
-function setAuthMode(mode) {
-  state.authMode = mode;
-  const isRegister = mode === "register";
-  elements.authNameField.hidden = !isRegister;
-  elements.authSubmitBtn.textContent = isRegister ? "Create account" : "Sign in";
-  elements.loginModeBtn.classList.toggle("is-active", !isRegister);
-  elements.registerModeBtn.classList.toggle("is-active", isRegister);
-}
-
-function setLoading(button, active) {
-  button.disabled = active;
-  button.setAttribute("aria-busy", String(active));
-  button.classList.toggle("is-loading", active);
-}
-
-function showToast(message, tone = "safe") {
-  const toast = document.createElement("div");
-  toast.className = `toast ${tone}`;
-  toast.textContent = message;
-  elements.toastHost.appendChild(toast);
-
-  while (elements.toastHost.childElementCount > 4) {
-    elements.toastHost.firstElementChild?.remove();
-  }
-
-  window.setTimeout(() => {
-    toast.remove();
-  }, 3600);
+function breakdownRowMarkup(label, value, total, tone) {
+  const ratio = total ? Math.round((value / total) * 100) : 0;
+  return `
+    <div class="breakdown-row">
+      <div class="breakdown-copy">
+        <strong>${escapeHtml(label)}</strong>
+        <span>${value} (${ratio}%)</span>
+      </div>
+      <div class="breakdown-track">
+        <span class="breakdown-fill breakdown-${tone}" style="width: ${ratio}%"></span>
+      </div>
+    </div>
+  `;
 }
 
 function gaugeMarkup({ value, label, valueSuffix = "", tone }) {
@@ -1186,6 +1448,95 @@ function trustTone(score) {
   return "safe";
 }
 
+function scheduleHistoryRender() {
+  window.clearTimeout(state.historyRenderTimeout);
+  state.historyRenderTimeout = window.setTimeout(() => {
+    renderHistoryTable();
+  }, SEARCH_DEBOUNCE_MS);
+}
+
+function ensureAuthenticated() {
+  if (state.user && state.accessToken) {
+    return true;
+  }
+
+  navigateTo("/login", { replace: true });
+  showAuthAlert("Sign in to access the protected workspace.");
+  return false;
+}
+
+function navigateTo(path, options = {}) {
+  if (window.location.pathname !== path) {
+    window.history[options.replace ? "replaceState" : "pushState"]({}, "", path);
+  }
+  state.routePath = path;
+  renderRoute();
+}
+
+function viewFromPath(pathname) {
+  switch (pathname) {
+    case "/register":
+      return "register";
+    case "/forgot-password":
+      return "forgot";
+    case "/reset-password":
+      return "reset";
+    case "/verify-email":
+      return "login";
+    case "/login":
+    default:
+      return "login";
+  }
+}
+
+function authPathForView(view) {
+  switch (view) {
+    case "register":
+      return "/register";
+    case "forgot":
+      return "/forgot-password";
+    case "reset":
+      return "/reset-password";
+    case "login":
+    default:
+      return "/login";
+  }
+}
+
+function isProtectedPath(pathname) {
+  return pathname === "/" || pathname === "/app" || pathname === "/profile";
+}
+
+function isPublicPath(pathname) {
+  return pathname === "/login" || pathname === "/register" || pathname === "/forgot-password" || pathname === "/reset-password" || pathname === "/verify-email";
+}
+
+function isVerificationRoute() {
+  return window.location.pathname === "/verify-email";
+}
+
+function readRouteToken(name) {
+  return new URLSearchParams(window.location.search).get(name) || "";
+}
+
+function setLoading(button, active) {
+  button.disabled = active;
+  button.classList.toggle("is-loading", active);
+}
+
+function showToast(message, tone = "safe") {
+  const toast = document.createElement("div");
+  toast.className = `toast ${tone}`;
+  toast.textContent = message;
+  elements.toastHost.appendChild(toast);
+
+  while (elements.toastHost.childElementCount > 4) {
+    elements.toastHost.firstElementChild?.remove();
+  }
+
+  window.setTimeout(() => toast.remove(), 3600);
+}
+
 function formatDateTime(value) {
   return DATE_TIME_FORMATTER.format(new Date(value));
 }
@@ -1213,51 +1564,12 @@ function escapeHtml(value) {
     .replaceAll("'", "&#39;");
 }
 
-function isValidUrl(value) {
-  try {
-    const url = new URL(value);
-    return ["http:", "https:"].includes(url.protocol);
-  } catch (error) {
-    return false;
-  }
-}
-
-function isValidEmail(value) {
-  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
-}
-
 function safeHostname(value) {
   try {
     return new URL(value).hostname;
   } catch (error) {
     return value;
   }
-}
-
-function scheduleHistoryRender() {
-  window.clearTimeout(historyRenderTimeout);
-  historyRenderTimeout = window.setTimeout(() => {
-    renderHistoryTable();
-  }, SEARCH_DEBOUNCE_MS);
-}
-
-async function runRequest(key, execute) {
-  activeRequests.get(key)?.abort();
-
-  const controller = new AbortController();
-  activeRequests.set(key, controller);
-
-  try {
-    return await execute(controller.signal);
-  } finally {
-    if (activeRequests.get(key) === controller) {
-      activeRequests.delete(key);
-    }
-  }
-}
-
-function getViewerName() {
-  return state.settings.displayName || state.user?.name || "Analyst";
 }
 
 function createRecordId() {
@@ -1274,12 +1586,8 @@ function normalizeTimestamp(value) {
 
 function clampNumber(value, min, max, fallback) {
   const numeric = Number(value);
-  if (Number.isNaN(numeric)) {
+  if (!Number.isFinite(numeric)) {
     return fallback;
   }
   return Math.min(max, Math.max(min, numeric));
-}
-
-function hasCustomizedSettings(settings) {
-  return JSON.stringify(normalizeSettings(settings)) !== JSON.stringify(DEFAULT_SETTINGS);
 }

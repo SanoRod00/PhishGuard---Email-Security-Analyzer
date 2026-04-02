@@ -1,0 +1,37 @@
+<svg width="720" height="220" viewBox="0 0 720 220" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="bg" x1="24" y1="18" x2="186" y2="198" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#2DB6FF"/>
+      <stop offset="0.48" stop-color="#155EEF"/>
+      <stop offset="1" stop-color="#0F4ACB"/>
+    </linearGradient>
+    <linearGradient id="shield" x1="62" y1="52" x2="154" y2="172" gradientUnits="userSpaceOnUse">
+      <stop stop-color="white"/>
+      <stop offset="1" stop-color="#D8E6FF"/>
+    </linearGradient>
+    <filter id="shadow" x="0" y="0" width="220" height="220" filterUnits="userSpaceOnUse" color-interpolation-filters="sRGB">
+      <feFlood flood-opacity="0" result="BackgroundImageFix"/>
+      <feColorMatrix in="SourceAlpha" type="matrix" values="0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 127 0" result="hardAlpha"/>
+      <feOffset dy="12"/>
+      <feGaussianBlur stdDeviation="12"/>
+      <feColorMatrix type="matrix" values="0 0 0 0 0.0588235 0 0 0 0 0.290196 0 0 0 0 0.796078 0 0 0 0.22 0"/>
+      <feBlend mode="normal" in2="BackgroundImageFix" result="effect1_dropShadow_1_2"/>
+      <feBlend mode="normal" in="SourceGraphic" in2="effect1_dropShadow_1_2" result="shape"/>
+    </filter>
+  </defs>
+  <g filter="url(#shadow)">
+    <rect x="24" y="18" width="172" height="172" rx="42" fill="url(#bg)"/>
+  </g>
+  <path d="M110 48L153 64V106C153 135.1 134.7 161.8 110 173.2C85.3 161.8 67 135.1 67 106V64L110 48Z" fill="url(#shield)" fill-opacity="0.16"/>
+  <path d="M110 58L145 71.4V105.2C145 128.7 130.8 150.8 110 161.2C89.2 150.8 75 128.7 75 105.2V71.4L110 58Z" stroke="url(#shield)" stroke-width="9" stroke-linejoin="round"/>
+  <rect x="81" y="87" width="58" height="35" rx="11" fill="white"/>
+  <path d="M84 94L110 112L136 94" stroke="#155EEF" stroke-width="7" stroke-linecap="round" stroke-linejoin="round"/>
+  <circle cx="140" cy="130" r="17" fill="#0F4ACB"/>
+  <path d="M133 130L139 136L150 124" stroke="white" stroke-width="7" stroke-linecap="round" stroke-linejoin="round"/>
+  <text x="236" y="103" fill="#10233E" font-family="Satoshi, Avenir Next, Segoe UI, sans-serif" font-size="72" font-weight="800" letter-spacing="-2">
+    PhishGuard
+  </text>
+  <text x="238" y="146" fill="#6B7A90" font-family="IBM Plex Sans, Avenir Next, Segoe UI, sans-serif" font-size="28" font-weight="600" letter-spacing="3.5">
+    EMAIL SECURITY ANALYZER
+  </text>
+</svg>

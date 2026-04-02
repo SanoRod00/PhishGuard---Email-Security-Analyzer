@@ -3,448 +3,607 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>PhishGuard | Scan before you click</title>
+    <title>PhishGuard | Secure Email Review Workspace</title>
     <meta
       name="description"
-      content="PhishGuard analyzes suspicious links and sender addresses before you open an attachment or click a link."
+      content="PhishGuard protects email-review workflows with verified accounts, secure token-based authentication, and phishing triage dashboards."
     />
+    <link rel="icon" type="image/svg+xml" href="./phishguard-mark.svg" />
     <link rel="stylesheet" href="./styles.css" />
   </head>
   <body>
     <div class="app-shell">
       <header class="site-header">
         <div class="brand-row">
-          <div class="brand-mark">PG</div>
+          <a class="brand-mark" href="/app" aria-label="PhishGuard home">
+            <img src="./phishguard-mark.svg" alt="PhishGuard logo" />
+          </a>
           <div class="brand-copy">
             <p class="eyebrow">PhishGuard</p>
             <span class="brand-subtitle">Email Security Analyzer</span>
           </div>
         </div>
-        <div id="headerStatus" class="header-status">Guest workspace</div>
+
+        <nav id="siteNav" class="site-nav" hidden>
+          <a href="/app" data-route-link="/app">Dashboard</a>
+          <a href="/profile" data-route-link="/profile">Profile</a>
+        </nav>
+
+        <div class="header-actions">
+          <div id="headerStatus" class="header-status">Authentication required</div>
+          <button id="logoutBtn" class="button button-secondary" hidden>Logout</button>
+        </div>
       </header>
 
-      <section class="hero panel">
-        <div class="hero-copy">
-          <p class="eyebrow">Email Triage Workspace</p>
-          <h1>Review suspicious links and senders without the noise.</h1>
-          <p class="lede">
-            Run URL and sender checks from one screen, compare the result instantly, and keep a
-            lightweight case history in the browser or sync it to your account for follow-up.
-          </p>
-
-          <div class="hero-actions">
-            <button id="combinedScanBtn" class="button button-primary">Run complete review</button>
-            <a class="button button-secondary" href="#analyticsSection">Jump to analytics</a>
+      <section id="authShell" class="auth-shell panel">
+        <div class="auth-hero">
+          <div class="auth-hero-copy">
+            <p class="eyebrow">Secure Access</p>
+            <h1>Authenticate before reviewing any message intelligence.</h1>
+            <p class="lede">
+              Every protected workflow in PhishGuard is gated behind verified accounts, rotating
+              tokens, CSRF protection, and server-side session controls.
+            </p>
           </div>
 
-          <div class="hero-points">
-            <article class="hero-point">
-              <strong>URL reputation</strong>
-              <p>Surface the vendor verdicts that matter first.</p>
+          <div class="auth-hero-accent" aria-hidden="true">
+            <span></span>
+            <span></span>
+            <span></span>
+          </div>
+
+          <div class="auth-benefits">
+            <article class="auth-benefit">
+              <span class="auth-benefit-number">01</span>
+              <div>
+                <strong>Verified accounts</strong>
+                <p>Registration requires email verification before login is allowed.</p>
+              </div>
             </article>
-            <article class="hero-point">
-              <strong>User workspaces</strong>
-              <p>Keep settings and case history attached to the analyst who needs them.</p>
+            <article class="auth-benefit">
+              <span class="auth-benefit-number">02</span>
+              <div>
+                <strong>Token rotation</strong>
+                <p>Short-lived access tokens pair with refresh tokens stored in httpOnly cookies.</p>
+              </div>
             </article>
-            <article class="hero-point">
-              <strong>Visual trends</strong>
-              <p>See recurring risk patterns instead of treating every scan as isolated.</p>
+            <article class="auth-benefit">
+              <span class="auth-benefit-number">03</span>
+              <div>
+                <strong>Protected workspace</strong>
+                <p>Dashboard, profile, scans, settings, and history stay behind authentication.</p>
+              </div>
             </article>
           </div>
         </div>
 
-        <aside class="hero-sidebar">
-          <div class="sidebar-head">
-            <div>
-              <p class="eyebrow">Session Overview</p>
-              <h2>Current review queue</h2>
-            </div>
-            <span class="pill pill-neutral">Synced when signed in</span>
+        <div class="auth-card">
+          <div class="auth-tabs">
+            <button class="auth-tab is-active" data-auth-view="login" type="button">Login</button>
+            <button class="auth-tab" data-auth-view="register" type="button">Register</button>
+            <button class="auth-tab" data-auth-view="forgot" type="button">Forgot Password</button>
           </div>
 
-          <div class="overview-metrics">
-            <article class="metric-card">
-              <span class="metric-label">Total scans</span>
-              <strong class="metric-value" id="totalScansMetric">0</strong>
-            </article>
-            <article class="metric-card">
-              <span class="metric-label">Dangerous</span>
-              <strong class="metric-value" id="dangerScansMetric">0</strong>
-            </article>
-            <article class="metric-card">
-              <span class="metric-label">Disposable</span>
-              <strong class="metric-value" id="disposableMetric">0</strong>
-            </article>
-          </div>
+          <div id="authAlert" class="auth-alert" hidden></div>
 
-          <div id="combinedSummary" class="combined-summary">
-            Run the complete review when both a suspicious link and sender address are available.
-          </div>
-        </aside>
-      </section>
+          <form id="loginForm" class="scan-form auth-form">
+            <label for="loginEmail">
+              Email
+              <input id="loginEmail" type="email" autocomplete="email" required />
+            </label>
+            <label for="loginPassword">
+              Password
+              <input id="loginPassword" type="password" autocomplete="current-password" required />
+            </label>
+            <label class="checkbox-label auth-checkbox">
+              <input id="rememberMe" type="checkbox" />
+              Remember me for 7 days
+            </label>
+            <button id="loginSubmitBtn" class="button button-primary" type="submit">Sign in</button>
+            <button class="auth-link" data-route-action="/forgot-password" type="button">
+              Forgot your password?
+            </button>
+          </form>
 
-      <main>
-        <section class="scanner-grid">
-          <article class="panel scanner-panel">
-            <div class="panel-heading">
-              <div>
-                <p class="eyebrow">URL Review</p>
-                <h2>Inspect the destination</h2>
-              </div>
-              <span class="pill pill-neutral">VirusTotal</span>
+          <form id="registerForm" class="scan-form auth-form" hidden>
+            <div class="settings-split">
+              <label for="registerFirstName">
+                First name
+                <input id="registerFirstName" type="text" autocomplete="given-name" required />
+              </label>
+              <label for="registerLastName">
+                Last name
+                <input id="registerLastName" type="text" autocomplete="family-name" required />
+              </label>
             </div>
-
-            <p class="panel-copy">
-              Paste the destination from the email and check whether vendors already flag it as
-              malicious or suspicious.
-            </p>
-
-            <form id="urlScanForm" class="scan-form">
-              <label for="urlInput">Suspicious URL</label>
-              <div class="field-row">
-                <input
-                  id="urlInput"
-                  name="url"
-                  type="url"
-                  placeholder="https://suspicious-link.example"
-                  autocomplete="off"
-                  required
-                />
-                <button type="submit" id="urlScanBtn" class="button button-primary">
-                  Scan URL
-                </button>
+            <label for="registerEmail">
+              Email
+              <input id="registerEmail" type="email" autocomplete="email" required />
+            </label>
+            <label for="registerPassword">
+              Password
+              <input id="registerPassword" type="password" autocomplete="new-password" required />
+            </label>
+            <div class="password-meter">
+              <div class="password-meter-track">
+                <span id="passwordMeterFill" class="password-meter-fill"></span>
               </div>
-              <p class="helper-text">Use this for shortened links, login pages, or payment portals.</p>
-            </form>
-
-            <div id="urlResult" class="result-card result-empty">URL scan results will appear here.</div>
-          </article>
-
-          <article class="panel scanner-panel">
-            <div class="panel-heading">
-              <div>
-                <p class="eyebrow">Sender Review</p>
-                <h2>Validate the email address</h2>
-              </div>
-              <span class="pill pill-neutral">Disify + Abstract</span>
-            </div>
-
-            <p class="panel-copy">
-              Check whether the sender looks legitimate before anyone replies, clicks, or shares
-              credentials.
-            </p>
-
-            <form id="emailScanForm" class="scan-form">
-              <label for="emailInput">Sender email address</label>
-              <div class="field-row">
-                <input
-                  id="emailInput"
-                  name="email"
-                  type="email"
-                  placeholder="billing@company-example.com"
-                  autocomplete="off"
-                  required
-                />
-                <button type="submit" id="emailScanBtn" class="button button-primary">
-                  Validate sender
-                </button>
-              </div>
-              <p class="helper-text">
-                Trust scoring blends disposable detection, deliverability status, and sender heuristics.
+              <p id="passwordStrengthLabel" class="helper-text">
+                Use 8+ characters with upper, lower, number, and special character.
               </p>
-            </form>
-
-            <div id="emailResult" class="result-card result-empty">
-              Sender validation results will appear here.
             </div>
-          </article>
-        </section>
-
-        <section class="workspace-grid">
-          <article class="panel auth-panel">
-            <div class="panel-heading">
-              <div>
-                <p class="eyebrow">Access</p>
-                <h2>User authentication</h2>
-              </div>
-            </div>
-
-            <div id="sessionSummary" class="session-summary"></div>
-
-            <div class="auth-toggle">
-              <button id="loginModeBtn" class="auth-toggle-button is-active" type="button">
-                Sign in
-              </button>
-              <button id="registerModeBtn" class="auth-toggle-button" type="button">
-                Create account
-              </button>
-            </div>
-
-            <form id="authForm" class="scan-form auth-form">
-              <label id="authNameField" for="authNameInput" hidden>
-                Display name
-                <input
-                  id="authNameInput"
-                  type="text"
-                  placeholder="Case owner name"
-                  autocomplete="name"
-                />
-              </label>
-
-              <label for="authEmailInput">
-                Email
-                <input
-                  id="authEmailInput"
-                  type="email"
-                  placeholder="analyst@company-example.com"
-                  autocomplete="email"
-                  required
-                />
-              </label>
-
-              <label for="authPasswordInput">
-                Password
-                <input
-                  id="authPasswordInput"
-                  type="password"
-                  placeholder="Use at least 10 characters"
-                  autocomplete="current-password"
-                  minlength="10"
-                  required
-                />
-              </label>
-
-              <button id="authSubmitBtn" type="submit" class="button button-primary">
-                Sign in
-              </button>
-            </form>
-
-            <div class="account-actions">
-              <button id="signOutBtn" type="button" class="button button-secondary" hidden>
-                Sign out
-              </button>
-            </div>
-          </article>
-
-          <article class="panel settings-panel">
-            <div class="panel-heading">
-              <div>
-                <p class="eyebrow">Preferences</p>
-                <h2>Personalized settings</h2>
-              </div>
-            </div>
-
-            <form id="settingsForm" class="scan-form">
-              <label for="displayNameInput">
-                Display name
-                <input
-                  id="displayNameInput"
-                  type="text"
-                  placeholder="Shown in the workspace header"
-                  autocomplete="nickname"
-                />
-              </label>
-
-              <label for="settingsThreatFilter">
-                Default threat filter
-                <select id="settingsThreatFilter">
-                  <option value="all">All results</option>
-                  <option value="safe">Safe only</option>
-                  <option value="suspicious">Suspicious first</option>
-                  <option value="dangerous">Dangerous only</option>
-                </select>
-              </label>
-
-              <div class="settings-split">
-                <label for="settingsTimelineLength">
-                  Timeline size
-                  <select id="settingsTimelineLength">
-                    <option value="4">4 items</option>
-                    <option value="6">6 items</option>
-                    <option value="8">8 items</option>
-                    <option value="12">12 items</option>
-                  </select>
-                </label>
-
-                <label for="settingsDashboardRange">
-                  Dashboard range
-                  <select id="settingsDashboardRange">
-                    <option value="7">7 days</option>
-                    <option value="14">14 days</option>
-                    <option value="30">30 days</option>
-                  </select>
-                </label>
-              </div>
-
-              <label class="checkbox-label inline-checkbox">
-                <input id="settingsDisposableOnly" type="checkbox" />
-                Focus history on disposable senders by default
-              </label>
-
-              <button id="settingsSaveBtn" type="submit" class="button button-primary">
-                Save preferences
-              </button>
-            </form>
-
-            <p id="settingsStatus" class="helper-text">
-              Save your defaults here, then use the history filters for one-off views.
-            </p>
-          </article>
-        </section>
-
-        <section id="analyticsSection" class="insights-grid">
-          <article class="panel analytics-panel">
-            <div class="panel-heading">
-              <div>
-                <p class="eyebrow">Analytics</p>
-                <h2>Advanced visualization</h2>
-              </div>
-              <span id="analyticsRangeLabel" class="pill pill-neutral">Last 14 days</span>
-            </div>
-
-            <div id="analyticsSummary" class="analytics-summary-grid"></div>
-
-            <div class="analytics-layout">
-              <section class="analytics-block">
-                <h3>Threat mix</h3>
-                <div id="riskBreakdown" class="breakdown-list"></div>
-              </section>
-
-              <section class="analytics-block">
-                <h3>Scan mix</h3>
-                <div id="typeBreakdown" class="breakdown-list"></div>
-              </section>
-
-              <section class="analytics-block analytics-span">
-                <h3>Daily activity</h3>
-                <div id="activityChart" class="activity-chart"></div>
-              </section>
-
-              <section class="analytics-block analytics-span">
-                <h3>Top monitored domains</h3>
-                <div id="domainLeaderboard" class="leaderboard"></div>
-              </section>
-            </div>
-
-            <div id="personalInsight" class="insight-callout"></div>
-          </article>
-
-          <article class="panel">
-            <div class="panel-heading">
-              <div>
-                <p class="eyebrow">Activity</p>
-                <h2>Recent timeline</h2>
-              </div>
-            </div>
-            <div id="timeline" class="timeline">
-              <div class="timeline-empty">Run a scan to build your investigation timeline.</div>
-            </div>
-
-            <div class="review-guide">
-              <p class="eyebrow">Review Guide</p>
-              <ul class="privacy-list">
-                <li>Escalate any URL with multiple malicious or suspicious vendor detections.</li>
-                <li>Treat disposable sender addresses as high-risk until the message is verified.</li>
-                <li>Use the combined review when the message includes both a link and a sender.</li>
-                <li>Signed-in workspaces keep your preferences and history attached to the analyst.</li>
-              </ul>
-            </div>
-          </article>
-        </section>
-
-        <section id="historySection" class="panel history-panel">
-          <div class="panel-heading">
-            <div>
-              <p class="eyebrow">Case History</p>
-              <h2>Stored investigations</h2>
-            </div>
-            <div class="history-actions">
-              <button id="clearHistoryBtn" class="button button-secondary">Clear history</button>
-            </div>
-          </div>
-
-          <div class="filters-grid">
-            <label>
-              Search
+            <label for="registerPasswordConfirm">
+              Confirm password
               <input
-                id="searchInput"
-                type="search"
-                placeholder="Search URL, email, domain, or summary"
-                autocomplete="off"
+                id="registerPasswordConfirm"
+                type="password"
+                autocomplete="new-password"
+                required
               />
             </label>
+            <button id="registerSubmitBtn" class="button button-primary" type="submit">
+              Create account
+            </button>
+          </form>
 
-            <label>
-              Sort
-              <select id="sortSelect">
-                <option value="date_desc">Date: newest first</option>
-                <option value="date_asc">Date: oldest first</option>
-                <option value="threat_desc">Threat: high to low</option>
-                <option value="threat_asc">Threat: low to high</option>
-                <option value="type_asc">Scan type</option>
-              </select>
+          <form id="forgotPasswordForm" class="scan-form auth-form" hidden>
+            <label for="forgotEmail">
+              Account email
+              <input id="forgotEmail" type="email" autocomplete="email" required />
             </label>
+            <button id="forgotSubmitBtn" class="button button-primary" type="submit">
+              Send reset link
+            </button>
+          </form>
 
-            <label>
-              Threat level
-              <select id="threatFilter">
-                <option value="all">All</option>
-                <option value="safe">Safe</option>
-                <option value="suspicious">Suspicious</option>
-                <option value="dangerous">Dangerous</option>
-              </select>
+          <form id="resetPasswordForm" class="scan-form auth-form" hidden>
+            <p class="helper-text">
+              Set a new password for your account. The same complexity rules still apply.
+            </p>
+            <label for="resetPassword">
+              New password
+              <input id="resetPassword" type="password" autocomplete="new-password" required />
             </label>
+            <label for="resetPasswordConfirm">
+              Confirm new password
+              <input
+                id="resetPasswordConfirm"
+                type="password"
+                autocomplete="new-password"
+                required
+              />
+            </label>
+            <button id="resetSubmitBtn" class="button button-primary" type="submit">
+              Reset password
+            </button>
+          </form>
 
-            <label>
-              Scan type
-              <select id="typeFilter">
-                <option value="all">All</option>
-                <option value="url">URL</option>
-                <option value="email">Email</option>
-                <option value="combined">Both</option>
-              </select>
-            </label>
+          <div id="authInfoCard" class="session-summary auth-info-card">
+            <strong>Security posture</strong>
+            <p>
+              Login is rate-limited, refresh tokens rotate in httpOnly cookies, and all write
+              operations require a CSRF token.
+            </p>
+          </div>
+        </div>
+      </section>
 
-            <label>
-              From
-              <input id="fromDate" type="date" />
-            </label>
+      <div id="protectedApp" hidden>
+        <section id="dashboardView">
+          <section class="hero panel">
+            <div class="hero-copy">
+              <p class="eyebrow">Protected Workspace</p>
+              <h1>Review suspicious links and senders without the noise.</h1>
+              <p class="lede">
+                Authenticated analysts can scan indicators, review stored investigations, and work
+                against the protected PhishGuard dashboard.
+              </p>
 
-            <label>
-              To
-              <input id="toDate" type="date" />
-            </label>
+              <div class="hero-actions">
+                <button id="combinedScanBtn" class="button button-primary">Run complete review</button>
+                <a class="button button-secondary" href="#analyticsSection">Jump to analytics</a>
+              </div>
 
-            <label class="checkbox-label">
-              <input id="disposableOnly" type="checkbox" />
-              Disposable emails only
-            </label>
+              <div class="hero-points">
+                <article class="hero-point">
+                  <strong>URL reputation</strong>
+                  <p>Surface the vendor verdicts that matter first.</p>
+                </article>
+                <article class="hero-point">
+                  <strong>Verified users</strong>
+                  <p>Every saved review is tied to an authenticated account.</p>
+                </article>
+                <article class="hero-point">
+                  <strong>Visual trends</strong>
+                  <p>See recurring risk patterns instead of treating every scan as isolated.</p>
+                </article>
+              </div>
+            </div>
+
+            <aside class="hero-sidebar">
+              <div class="sidebar-head">
+                <div>
+                  <p class="eyebrow">Session Overview</p>
+                  <h2>Current review queue</h2>
+                </div>
+                <span class="pill pill-neutral">Authenticated</span>
+              </div>
+
+              <div class="overview-metrics">
+                <article class="metric-card">
+                  <span class="metric-label">Total scans</span>
+                  <strong class="metric-value" id="totalScansMetric">0</strong>
+                </article>
+                <article class="metric-card">
+                  <span class="metric-label">Dangerous</span>
+                  <strong class="metric-value" id="dangerScansMetric">0</strong>
+                </article>
+                <article class="metric-card">
+                  <span class="metric-label">Disposable</span>
+                  <strong class="metric-value" id="disposableMetric">0</strong>
+                </article>
+              </div>
+
+              <div id="combinedSummary" class="combined-summary">
+                Run the complete review when both a suspicious link and sender address are available.
+              </div>
+            </aside>
+          </section>
+
+          <main>
+            <section class="scanner-grid">
+              <article class="panel scanner-panel">
+                <div class="panel-heading">
+                  <div>
+                    <p class="eyebrow">URL Review</p>
+                    <h2>Inspect the destination</h2>
+                  </div>
+                  <span class="pill pill-neutral">VirusTotal</span>
+                </div>
+
+                <p class="panel-copy">
+                  Paste the destination from the email and check whether vendors already flag it as
+                  malicious or suspicious.
+                </p>
+
+                <form id="urlScanForm" class="scan-form">
+                  <label for="urlInput">Suspicious URL</label>
+                  <div class="field-row">
+                    <input
+                      id="urlInput"
+                      name="url"
+                      type="url"
+                      placeholder="https://suspicious-link.example"
+                      autocomplete="off"
+                      required
+                    />
+                    <button type="submit" id="urlScanBtn" class="button button-primary">
+                      Scan URL
+                    </button>
+                  </div>
+                </form>
+
+                <div id="urlResult" class="result-card result-empty">URL scan results will appear here.</div>
+              </article>
+
+              <article class="panel scanner-panel">
+                <div class="panel-heading">
+                  <div>
+                    <p class="eyebrow">Sender Review</p>
+                    <h2>Validate the email address</h2>
+                  </div>
+                  <span class="pill pill-neutral">Disify + Abstract</span>
+                </div>
+
+                <p class="panel-copy">
+                  Check whether the sender looks legitimate before anyone replies, clicks, or shares
+                  credentials.
+                </p>
+
+                <form id="emailScanForm" class="scan-form">
+                  <label for="emailInput">Sender email address</label>
+                  <div class="field-row">
+                    <input
+                      id="emailInput"
+                      name="email"
+                      type="email"
+                      placeholder="billing@company-example.com"
+                      autocomplete="off"
+                      required
+                    />
+                    <button type="submit" id="emailScanBtn" class="button button-primary">
+                      Validate sender
+                    </button>
+                  </div>
+                </form>
+
+                <div id="emailResult" class="result-card result-empty">
+                  Sender validation results will appear here.
+                </div>
+              </article>
+            </section>
+
+            <section class="workspace-grid">
+              <article class="panel profile-card">
+                <div class="panel-heading">
+                  <div>
+                    <p class="eyebrow">Authenticated User</p>
+                    <h2>Current profile</h2>
+                  </div>
+                </div>
+
+                <div class="profile-stack">
+                  <div class="session-summary">
+                    <strong id="profileCardName">Protected account</strong>
+                    <p id="profileCardEmail">Signed-in user details will appear here.</p>
+                    <span id="verificationBadge" class="pill pill-neutral">Verified account</span>
+                  </div>
+
+                  <div class="profile-grid">
+                    <div class="detail-card">
+                      <span>First name</span>
+                      <strong id="profileFirstName">-</strong>
+                    </div>
+                    <div class="detail-card">
+                      <span>Last name</span>
+                      <strong id="profileLastName">-</strong>
+                    </div>
+                    <div class="detail-card">
+                      <span>Created</span>
+                      <strong id="profileCreatedAt">-</strong>
+                    </div>
+                    <div class="detail-card">
+                      <span>Token model</span>
+                      <strong>JWT + rotating refresh</strong>
+                    </div>
+                  </div>
+                </div>
+              </article>
+
+              <article class="panel settings-panel">
+                <div class="panel-heading">
+                  <div>
+                    <p class="eyebrow">Preferences</p>
+                    <h2>Protected settings</h2>
+                  </div>
+                </div>
+
+                <form id="settingsForm" class="scan-form">
+                  <label for="displayNameInput">
+                    Display name
+                    <input id="displayNameInput" type="text" autocomplete="nickname" />
+                  </label>
+
+                  <label for="settingsThreatFilter">
+                    Default threat filter
+                    <select id="settingsThreatFilter">
+                      <option value="all">All results</option>
+                      <option value="safe">Safe only</option>
+                      <option value="suspicious">Suspicious first</option>
+                      <option value="dangerous">Dangerous only</option>
+                    </select>
+                  </label>
+
+                  <div class="settings-split">
+                    <label for="settingsTimelineLength">
+                      Timeline size
+                      <select id="settingsTimelineLength">
+                        <option value="4">4 items</option>
+                        <option value="6">6 items</option>
+                        <option value="8">8 items</option>
+                        <option value="12">12 items</option>
+                      </select>
+                    </label>
+
+                    <label for="settingsDashboardRange">
+                      Dashboard range
+                      <select id="settingsDashboardRange">
+                        <option value="7">7 days</option>
+                        <option value="14">14 days</option>
+                        <option value="30">30 days</option>
+                      </select>
+                    </label>
+                  </div>
+
+                  <label class="checkbox-label inline-checkbox">
+                    <input id="settingsDisposableOnly" type="checkbox" />
+                    Focus history on disposable senders by default
+                  </label>
+
+                  <button id="settingsSaveBtn" type="submit" class="button button-primary">
+                    Save preferences
+                  </button>
+                </form>
+
+                <p id="settingsStatus" class="helper-text">
+                  These preferences are stored on the authenticated account.
+                </p>
+              </article>
+            </section>
+
+            <section id="analyticsSection" class="insights-grid">
+              <article class="panel analytics-panel">
+                <div class="panel-heading">
+                  <div>
+                    <p class="eyebrow">Analytics</p>
+                    <h2>Advanced visualization</h2>
+                  </div>
+                  <span id="analyticsRangeLabel" class="pill pill-neutral">Last 14 days</span>
+                </div>
+
+                <div id="analyticsSummary" class="analytics-summary-grid"></div>
+
+                <div class="analytics-layout">
+                  <section class="analytics-block">
+                    <h3>Threat mix</h3>
+                    <div id="riskBreakdown" class="breakdown-list"></div>
+                  </section>
+
+                  <section class="analytics-block">
+                    <h3>Scan mix</h3>
+                    <div id="typeBreakdown" class="breakdown-list"></div>
+                  </section>
+
+                  <section class="analytics-block analytics-span">
+                    <h3>Daily activity</h3>
+                    <div id="activityChart" class="activity-chart"></div>
+                  </section>
+
+                  <section class="analytics-block analytics-span">
+                    <h3>Top monitored domains</h3>
+                    <div id="domainLeaderboard" class="leaderboard"></div>
+                  </section>
+                </div>
+
+                <div id="personalInsight" class="insight-callout"></div>
+              </article>
+
+              <article class="panel">
+                <div class="panel-heading">
+                  <div>
+                    <p class="eyebrow">Activity</p>
+                    <h2>Recent timeline</h2>
+                  </div>
+                </div>
+                <div id="timeline" class="timeline">
+                  <div class="timeline-empty">Run a scan to build your investigation timeline.</div>
+                </div>
+              </article>
+            </section>
+
+            <section id="historySection" class="panel history-panel">
+              <div class="panel-heading">
+                <div>
+                  <p class="eyebrow">Case History</p>
+                  <h2>Stored investigations</h2>
+                </div>
+                <div class="history-actions">
+                  <button id="clearHistoryBtn" class="button button-secondary">Clear history</button>
+                </div>
+              </div>
+
+              <div class="filters-grid">
+                <label>
+                  Search
+                  <input
+                    id="searchInput"
+                    type="search"
+                    placeholder="Search URL, email, domain, or summary"
+                    autocomplete="off"
+                  />
+                </label>
+
+                <label>
+                  Sort
+                  <select id="sortSelect">
+                    <option value="date_desc">Date: newest first</option>
+                    <option value="date_asc">Date: oldest first</option>
+                    <option value="threat_desc">Threat: high to low</option>
+                    <option value="threat_asc">Threat: low to high</option>
+                    <option value="type_asc">Scan type</option>
+                  </select>
+                </label>
+
+                <label>
+                  Threat level
+                  <select id="threatFilter">
+                    <option value="all">All</option>
+                    <option value="safe">Safe</option>
+                    <option value="suspicious">Suspicious</option>
+                    <option value="dangerous">Dangerous</option>
+                  </select>
+                </label>
+
+                <label>
+                  Scan type
+                  <select id="typeFilter">
+                    <option value="all">All</option>
+                    <option value="url">URL</option>
+                    <option value="email">Email</option>
+                    <option value="combined">Both</option>
+                  </select>
+                </label>
+
+                <label>
+                  From
+                  <input id="fromDate" type="date" />
+                </label>
+
+                <label>
+                  To
+                  <input id="toDate" type="date" />
+                </label>
+
+                <label class="checkbox-label">
+                  <input id="disposableOnly" type="checkbox" />
+                  Disposable emails only
+                </label>
+              </div>
+
+              <div class="table-wrap">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Timestamp</th>
+                      <th>Type</th>
+                      <th>Indicator</th>
+                      <th>Domain</th>
+                      <th>Threat</th>
+                      <th>Summary</th>
+                      <th>Disposable</th>
+                    </tr>
+                  </thead>
+                  <tbody id="historyTableBody">
+                    <tr>
+                      <td colspan="7" class="table-empty">No scans stored yet.</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </section>
+          </main>
+        </section>
+
+        <section id="profileView" class="panel profile-page" hidden>
+          <div class="panel-heading">
+            <div>
+              <p class="eyebrow">Profile</p>
+              <h2>Authenticated user information</h2>
+            </div>
           </div>
 
-          <div class="table-wrap">
-            <table>
-              <thead>
-                <tr>
-                  <th>Timestamp</th>
-                  <th>Type</th>
-                  <th>Indicator</th>
-                  <th>Domain</th>
-                  <th>Threat</th>
-                  <th>Summary</th>
-                  <th>Disposable</th>
-                </tr>
-              </thead>
-              <tbody id="historyTableBody">
-                <tr>
-                  <td colspan="7" class="table-empty">No scans stored yet.</td>
-                </tr>
-              </tbody>
-            </table>
+          <div class="profile-page-grid">
+            <article class="session-summary">
+              <strong id="profilePageName">Protected account</strong>
+              <p id="profilePageEmail">Authenticated user details will appear here.</p>
+              <span class="timeline-meta">This page is available only after token validation.</span>
+            </article>
+
+            <article class="detail-card">
+              <span>User ID</span>
+              <strong id="profilePageId">-</strong>
+            </article>
+
+            <article class="detail-card">
+              <span>Email verification</span>
+              <strong id="profilePageVerified">-</strong>
+            </article>
+
+            <article class="detail-card">
+              <span>Account created</span>
+              <strong id="profilePageCreatedAt">-</strong>
+            </article>
+
+            <article class="detail-card">
+              <span>Last profile update</span>
+              <strong id="profilePageUpdatedAt">-</strong>
+            </article>
           </div>
         </section>
-      </main>
 
-      <button id="exportBtn" class="button button-primary floating-export">Export results</button>
+        <button id="exportBtn" class="button button-primary floating-export">Export results</button>
+      </div>
+
       <div id="toastHost" class="toast-host" aria-live="polite" aria-atomic="true"></div>
     </div>
 

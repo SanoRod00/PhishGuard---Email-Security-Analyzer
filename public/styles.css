@@ -70,7 +70,9 @@ a {
 .result-header,
 .timeline-item-header,
 .breakdown-copy,
-.leaderboard-row {
+.leaderboard-row,
+.header-actions,
+.site-nav {
   display: flex;
   align-items: center;
   gap: 0.9rem;
@@ -81,7 +83,8 @@ a {
 .sidebar-head,
 .timeline-item-header,
 .result-header,
-.leaderboard-row {
+.leaderboard-row,
+.header-actions {
   justify-content: space-between;
 }
 
@@ -98,6 +101,19 @@ a {
   font-size: 0.9rem;
 }
 
+.site-nav a {
+  padding: 0.55rem 0.85rem;
+  border-radius: 999px;
+  color: var(--ink-soft);
+  text-decoration: none;
+  font-weight: 600;
+}
+
+.site-nav a.is-active {
+  color: var(--ink-strong);
+  background: rgba(21, 94, 239, 0.1);
+}
+
 .panel {
   background: var(--surface-panel);
   border: 1px solid var(--line-soft);
@@ -108,16 +124,18 @@ a {
 }
 
 .brand-mark {
-  display: grid;
-  place-items: center;
-  width: 3.2rem;
-  height: 3.2rem;
-  border-radius: 1rem;
-  background: linear-gradient(135deg, var(--accent-blue), #22a1f2);
-  color: #fff;
-  font-weight: 700;
-  letter-spacing: 0.06em;
-  box-shadow: 0 10px 24px rgba(21, 94, 239, 0.25);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 3.4rem;
+  height: 3.4rem;
+  text-decoration: none;
+}
+
+.brand-mark img {
+  display: block;
+  width: 100%;
+  height: 100%;
 }
 
 .brand-copy {
@@ -295,8 +313,132 @@ h3 {
 .scanner-panel,
 .history-panel,
 .workspace-grid > .panel,
-.insights-grid > .panel {
+.insights-grid > .panel,
+.auth-shell,
+.profile-page {
   padding: 1.35rem;
+}
+
+.auth-shell {
+  display: grid;
+  grid-template-columns: minmax(0, 1.1fr) minmax(24rem, 0.9fr);
+  gap: 1.4rem;
+}
+
+.auth-card {
+  display: grid;
+  gap: 1rem;
+  align-content: start;
+}
+
+.auth-tabs {
+  display: inline-flex;
+  gap: 0.45rem;
+  padding: 0.3rem;
+  border-radius: 999px;
+  background: rgba(21, 94, 239, 0.08);
+}
+
+.auth-tab {
+  border: 0;
+  border-radius: 999px;
+  padding: 0.8rem 1rem;
+  background: transparent;
+  color: var(--ink-soft);
+  cursor: pointer;
+  font-weight: 600;
+}
+
+.auth-tab.is-active {
+  background: #fff;
+  color: var(--ink-strong);
+  box-shadow: var(--shadow-md);
+}
+
+.auth-alert {
+  padding: 0.95rem 1rem;
+  border-radius: var(--radius-md);
+  border: 1px solid rgba(209, 67, 67, 0.18);
+  background: rgba(209, 67, 67, 0.08);
+  color: #852b2b;
+}
+
+.auth-alert.success {
+  border-color: rgba(25, 135, 84, 0.2);
+  background: rgba(25, 135, 84, 0.08);
+  color: #0f6b45;
+}
+
+.auth-form .button {
+  margin-top: 0.2rem;
+}
+
+.auth-checkbox {
+  margin-top: 0.2rem;
+}
+
+.auth-link {
+  justify-self: start;
+  border: 0;
+  background: transparent;
+  color: var(--accent-blue);
+  padding: 0;
+  cursor: pointer;
+  font-weight: 600;
+}
+
+.auth-info-card {
+  margin-top: 0.2rem;
+}
+
+.password-meter {
+  display: grid;
+  gap: 0.5rem;
+}
+
+.password-meter-track {
+  width: 100%;
+  height: 0.55rem;
+  border-radius: 999px;
+  background: rgba(16, 35, 62, 0.08);
+  overflow: hidden;
+}
+
+.password-meter-fill {
+  display: block;
+  height: 100%;
+  width: 8%;
+  background: rgba(209, 67, 67, 0.7);
+  transition: width 180ms ease, background-color 180ms ease;
+}
+
+.password-meter-fill.strength-0,
+.password-meter-fill.strength-1 {
+  background: rgba(209, 67, 67, 0.8);
+}
+
+.password-meter-fill.strength-2 {
+  background: rgba(183, 121, 31, 0.85);
+}
+
+.password-meter-fill.strength-3 {
+  background: rgba(21, 94, 239, 0.85);
+}
+
+.password-meter-fill.strength-4,
+.password-meter-fill.strength-5 {
+  background: rgba(25, 135, 84, 0.88);
+}
+
+.profile-stack,
+.profile-page-grid {
+  display: grid;
+  gap: 1rem;
+}
+
+.profile-page-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  margin-top: 1rem;
 }
 
 .hero-sidebar {
@@ -905,6 +1047,7 @@ mark {
 
 @media (max-width: 1040px) {
   .hero,
+  .auth-shell,
   .scanner-grid,
   .workspace-grid,
   .insights-grid,
@@ -922,7 +1065,8 @@ mark {
   .sidebar-head,
   .result-header,
   .site-header,
-  .leaderboard-row {
+  .leaderboard-row,
+  .header-actions {
     flex-direction: column;
     align-items: stretch;
   }
@@ -947,14 +1091,16 @@ mark {
   .scanner-panel,
   .history-panel,
   .workspace-grid > .panel,
-  .insights-grid > .panel {
+  .insights-grid > .panel,
+  .auth-shell,
+  .profile-page {
     padding: 1rem;
     border-radius: 24px;
   }
 
   .brand-mark {
-    width: 3rem;
-    height: 3rem;
+    width: 3.15rem;
+    height: 3.15rem;
   }
 
   h1 {
@@ -964,12 +1110,21 @@ mark {
   .button,
   input,
   select,
-  .auth-toggle {
+  .auth-toggle,
+  .auth-tabs {
     width: 100%;
   }
 
   .auth-toggle {
     display: grid;
+  }
+
+  .auth-tabs {
+    display: grid;
+  }
+
+  .profile-page-grid {
+    grid-template-columns: 1fr;
   }
 
   .floating-export {

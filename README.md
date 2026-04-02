@@ -1,131 +1,144 @@
-# PhishGuard - Email Security Analyzer
+# PhishGuard - Authenticated Email Security Analyzer
 
-PhishGuard helps people inspect suspicious links and sender email addresses before they click, reply, or download anything. It combines URL reputation checks, disposable inbox detection, optional deliverability validation, authenticated user workspaces, personalized investigation settings, and visual analytics over saved case history.
+PhishGuard is a protected email-review workspace for suspicious URLs and sender addresses. The app now uses a production-style authentication layer built on `Node.js`, `Express`, `PostgreSQL`, `JWT access tokens`, rotating `refresh tokens` in `httpOnly` cookies, CSRF protection, rate limiting, and email-based verification/reset flows.
 
-## 1. What is PhishGuard?
+## Tech Stack
 
-Phishing emails are designed to look urgent, familiar, and harmless long enough to steal credentials, money, or trust. PhishGuard gives individual users, small teams, students, and older adults a practical pre-click checkpoint:
+- Backend: Node.js, Express, PostgreSQL, bcrypt, jsonwebtoken, helmet, cors, express-rate-limit
+- Frontend: Vanilla JavaScript, HTML, CSS
+- Database: PostgreSQL with SQL migration file
+- Tests: Node test runner
 
-- Scan a suspicious URL against VirusTotal.
-- Validate whether a sender address is disposable or risky.
-- Save scan metadata in local browser storage for follow-up review.
-- Create analyst accounts so history and preferences follow the user.
-- Use built-in analytics to spot recurring risky domains and recent activity trends.
-- Export filtered history as CSV for incident tracking or reporting.
+## Auth Features
 
-## 2. Why It Matters
+- Registration with email verification
+- bcrypt password hashing with 12 rounds
+- JWT access tokens with 15 minute expiry
+- Refresh tokens with 7 day expiry stored in `httpOnly` cookies
+- Refresh-token invalidation on logout and password reset
+- Login rate limiting at 5 attempts per 15 minutes
+- Password reset via email with 1 hour expiry
+- CSRF protection for state-changing requests
+- Protected API routes and protected frontend routes
+- Automatic token refresh on the client before expiry
+- Profile page for authenticated users
 
-Phishing and business email compromise continue to cause billions of dollars in losses globally each year. The most common failure pattern is not malware sophistication; it is a user being forced to judge a message too quickly. PhishGuard slows that moment down and adds visible evidence before action.
+## Security Controls
 
-## 3. How To Use
+- `helmet` security headers
+- Strict CORS allowlist via `FRONTEND_URL`
+- HTTPS enforcement in production
+- Input validation and sanitization for auth endpoints
+- Parameterized PostgreSQL queries
+- Failed login and password-reset security logging
+- No plain-text password storage
+- Refresh tokens kept out of `localStorage`
 
-### Run locally
+## Local Setup
 
 1. Copy `.env.example` to `.env`.
-2. Add your `VIRUSTOTAL_API_KEY`.
-3. Optionally add your `ABSTRACT_API_KEY` for deliverability scoring.
-4. Add a `SESSION_SECRET` for stable authenticated sessions.
-4. Start the app:
+2. Configure PostgreSQL and update `DATABASE_URL`.
+3. Set strong values for:
+   - `JWT_SECRET`
+   - `JWT_REFRESH_SECRET`
+4. Configure SMTP credentials if you want real email delivery.
+   In development, the app logs verification/reset links when SMTP is not configured.
+5. Install dependencies:
+
+```bash
+npm install
+```
+
+6. Apply the authentication schema:
+
+```bash
+npm run migrate:auth
+```
+
+7. Start the server:
 
 ```bash
 npm start
 ```
 
-5. Open `http://localhost:3000`.
+8. Open [http://127.0.0.1:3000/login](http://127.0.0.1:3000/login).
 
-### Scan workflow
+## Route Gating
 
-1. Paste a suspicious link into the URL scanner and select `Scan URL`.
-2. Enter the sender email into the validator and select `Validate sender`.
-3. If you have both values, use `Run combined scan` for a unified risk snapshot.
-4. Optionally create an account to sync history and personalized defaults.
-5. Review the gauge, vendor verdicts, sender flags, analytics dashboard, and timeline.
-6. Use the history dashboard to sort, search, filter, and export CSV results.
+- Public frontend routes:
+  - `/login`
+  - `/register`
+  - `/forgot-password`
+  - `/reset-password`
+  - `/verify-email`
+- Protected frontend routes:
+  - `/`
+  - `/app`
+  - `/profile`
+- Protected API routes return `401` when no valid access token is supplied.
 
-### Recommended screenshots for documentation
+## Auth Flow
 
-- Hero section with the tagline `Scan before you click`
-- URL scan result with vendor detection table expanded
-- Sender validator result showing trust score and flags
-- Auth and preferences panel showing a signed-in workspace
-- Analytics dashboard with activity bars and top monitored domains
-- Filtered history dashboard with CSV export button visible
+1. Request a CSRF token from `GET /api/auth/csrf`.
+2. Register with `POST /api/auth/register`.
+3. Verify the account from the email link.
+4. Login with `POST /api/auth/login`.
+5. The frontend stores the short-lived access token in memory and the server stores the refresh token in an `httpOnly` cookie.
+6. Before access-token expiry, the frontend calls `POST /api/auth/refresh`.
+7. Logout revokes the refresh token and clears the cookie.
 
-## 4. API Credits
+## Scan Workflow
 
-- VirusTotal API: https://docs.virustotal.com/
-- Disify API: https://www.disify.com/
-- Abstract Email Validation API: https://www.abstractapi.com/email-verification-validation-api
+1. Sign in.
+2. Scan a suspicious link with the protected URL endpoint.
+3. Validate the sender email with the protected email endpoint.
+4. Save investigation history to the authenticated account.
+5. Review analytics and export filtered history.
 
-## 5. Deployment Guide
-
-### Environment variables
-
-Set these on both `Web01` and `Web02`:
-
-```bash
-HOST=127.0.0.1
-PORT=3000
-VIRUSTOTAL_API_KEY=your_key_here
-ABSTRACT_API_KEY=optional_key_here
-SESSION_SECRET=long_random_secret_here
-SESSION_TTL_DAYS=14
-```
-
-### Start the service
+## Scripts
 
 ```bash
 npm start
+npm run migrate:auth
+npm test
 ```
 
-For a production service example, see:
+## Database Files
 
-- `deploy/systemd/phishguard.service`
-- `deploy/nginx/phishguard.conf`
-- `deploy/haproxy/haproxy.cfg`
+- Migration: `db/migrations/001_auth_schema.sql`
+- Migration runner: `scripts/migrate-auth.js`
 
-### Health check
+## API Documentation
 
-The app exposes:
+See `docs/AUTH_API.md`.
 
-```text
-GET /health
-```
+## Security Checklist
 
-It returns `200 OK` with a JSON status payload and is suitable for load balancer health checks.
+See `SECURITY_CHECKLIST.md`.
 
-### Load balancer notes
+## Tests
 
-- Run the same build on `Web01` and `Web02`.
-- Keep identical `.env` values on both application servers.
-- Route traffic only to healthy nodes using `/health`.
-- Terminate TLS at the proxy or load balancer and keep upstream traffic on a trusted private network.
+The automated suite in `tests/auth.test.js` covers auth-critical validation and middleware behavior in a sandbox-safe way:
 
-## 6. Privacy Policy
-
-- PhishGuard does not store email contents on the server.
-- API keys remain in `.env` and must never be committed to Git.
-- Guest scan history is stored in the user browser via `localStorage`.
-- Signed-in workspace history and settings are stored on the app server in the local `data/` directory.
-- Exported CSV files are created client-side when the user requests them.
-- All upstream integrations are HTTPS endpoints.
+- password complexity enforcement
+- registration payload validation/sanitization
+- CSRF rejection behavior
+- access-token middleware behavior
+- refresh-token hashing behavior
 
 ## Project Structure
 
 ```text
 .
+├── db/
+│   └── migrations/
+├── docs/
 ├── public/
-│   ├── app.js
-│   ├── index.html
-│   └── styles.css
-├── deploy/
-│   ├── haproxy/
-│   ├── nginx/
-│   └── systemd/
-├── data/
-│   ├── profiles/
-│   └── users.json
+├── scripts/
+├── src/
+│   └── repositories/
+├── tests/
 ├── server.js
-├── .env.example
-└── package.json
+├── package.json
+└── .env.example
 ```
