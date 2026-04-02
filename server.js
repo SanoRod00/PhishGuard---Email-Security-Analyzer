@@ -1,19 +1,39 @@
 const http = require("http");
 const fs = require("fs");
 const path = require("path");
+const crypto = require("crypto");
 
 const ROOT_DIR = __dirname;
 const PUBLIC_DIR = path.join(ROOT_DIR, "public");
+const DATA_DIR = path.join(ROOT_DIR, "data");
+const USERS_FILE = path.join(DATA_DIR, "users.json");
+const PROFILES_DIR = path.join(DATA_DIR, "profiles");
 
 loadEnvFile(path.join(ROOT_DIR, ".env"));
 
 const HOST = process.env.HOST || "127.0.0.1";
 const PORT = Number(process.env.PORT || 3000);
 const STATIC_CACHE_CONTROL = "public, max-age=0, must-revalidate";
+const SESSION_COOKIE_NAME = "phishguard_session";
+const SESSION_TTL_DAYS = Number.isFinite(Number(process.env.SESSION_TTL_DAYS))
+  ? Math.min(90, Math.max(1, Number(process.env.SESSION_TTL_DAYS)))
+  : 14;
+const SESSION_TTL_MS = SESSION_TTL_DAYS * 24 * 60 * 60 * 1000;
+const SESSION_SECRET =
+  process.env.SESSION_SECRET || crypto.randomBytes(32).toString("hex");
+const PASSWORD_MIN_LENGTH = 10;
+const HISTORY_LIMIT = 150;
 const SCAN_CACHE_TTL_MS = {
   url: 10 * 60 * 1000,
   email: 10 * 60 * 1000
 };
+const DEFAULT_SETTINGS = Object.freeze({
+  displayName: "",
+  defaultThreatFilter: "all",
+  timelineLength: 6,
+  dashboardRangeDays: 14,
+  disposableOnly: false
+});
 const MIME_TYPES = {
   ".css": "text/css; charset=utf-8",
   ".html": "text/html; charset=utf-8",
@@ -27,9 +47,19 @@ const RISK_RANK = {
   suspicious: 2,
   dangerous: 3
 };
+const AUTH_THREAT_FILTERS = new Set(["all", "safe", "suspicious", "dangerous"]);
+const HISTORY_TYPES = new Set(["url", "email", "combined"]);
 const scanCache = new Map();
 const inFlightScans = new Map();
 const staticAssetCache = new Map();
+
+ensureDataStore();
+
+if (!process.env.SESSION_SECRET) {
+  console.warn(
+    "SESSION_SECRET is not set. Authentication will work, but active sessions reset when the server restarts."
+  );
+}
 
 class AppError extends Error {
   constructor(statusCode, message, details = {}) {
@@ -74,19 +104,149 @@ function loadEnvFile(filePath) {
   }
 }
 
-function sendJson(res, statusCode, payload) {
-  const body = JSON.stringify(payload);
-  res.writeHead(statusCode, {
-    "Content-Type": "application/json; charset=utf-8",
-    "Cache-Control": "no-store"
+function ensureDataStore() {
+  fs.mkdirSync(DATA_DIR, { recursive: true });
+  fs.mkdirSync(PROFILES_DIR, { recursive: true });
+
+  if (!fs.existsSync(USERS_FILE)) {
+    fs.writeFileSync(USERS_FILE, JSON.stringify({ users: [] }, null, 2));
+  }
+}
+
+function readJsonFile(filePath, fallbackValue) {
+  try {
+    return JSON.parse(fs.readFileSync(filePath, "utf8"));
+  } catch (error) {
+    return fallbackValue;
+  }
+}
+
+function writeJsonFile(filePath, value) {
+  const tempPath = `${filePath}.tmp`;
+  fs.writeFileSync(tempPath, JSON.stringify(value, null, 2));
+  fs.renameSync(tempPath, filePath);
+}
+
+function readUsers() {
+  const payload = readJsonFile(USERS_FILE, { users: [] });
+  const users = Array.isArray(payload) ? payload : payload.users;
+  return Array.isArray(users) ? users : [];
+}
+
+function writeUsers(users) {
+  writeJsonFile(USERS_FILE, { users });
+}
+
+function profilePath(userId) {
+  return path.join(PROFILES_DIR, `${userId}.json`);
+}
+
+function normalizeSettings(input = {}) {
+  return {
+    displayName: String(input.displayName || "").trim().slice(0, 60),
+    defaultThreatFilter: AUTH_THREAT_FILTERS.has(input.defaultThreatFilter)
+      ? input.defaultThreatFilter
+      : DEFAULT_SETTINGS.defaultThreatFilter,
+    timelineLength: clampNumber(input.timelineLength, 4, 12, DEFAULT_SETTINGS.timelineLength),
+    dashboardRangeDays: clampNumber(
+      input.dashboardRangeDays,
+      7,
+      30,
+      DEFAULT_SETTINGS.dashboardRangeDays
+    ),
+    disposableOnly: Boolean(input.disposableOnly)
+  };
+}
+
+function normalizeHistoryRecord(record = {}) {
+  const threatLevel = Object.prototype.hasOwnProperty.call(RISK_RANK, record.threatLevel)
+    ? record.threatLevel
+    : "safe";
+  const type = HISTORY_TYPES.has(record.type) ? record.type : "url";
+  const timestamp = new Date(record.timestamp || Date.now());
+
+  return {
+    id:
+      typeof record.id === "string" && record.id.trim()
+        ? record.id.trim().slice(0, 120)
+        : crypto.randomUUID(),
+    type,
+    target: String(record.target || "").trim().slice(0, 320),
+    domain: String(record.domain || "").trim().slice(0, 120),
+    threatLevel,
+    threatScore: clampNumber(record.threatScore, 0, 100, 0),
+    disposable: Boolean(record.disposable),
+    summary: String(record.summary || "").trim().slice(0, 240),
+    timestamp: Number.isNaN(timestamp.getTime()) ? new Date().toISOString() : timestamp.toISOString()
+  };
+}
+
+function normalizeHistory(records) {
+  if (!Array.isArray(records)) {
+    return [];
+  }
+
+  const deduped = new Map();
+
+  for (const item of records) {
+    const record = normalizeHistoryRecord(item);
+    if (!record.target || !record.summary) {
+      continue;
+    }
+    deduped.set(record.id, record);
+  }
+
+  return [...deduped.values()]
+    .sort((left, right) => new Date(right.timestamp) - new Date(left.timestamp))
+    .slice(0, HISTORY_LIMIT);
+}
+
+function readUserProfile(userId) {
+  const payload = readJsonFile(profilePath(userId), null);
+
+  if (!payload) {
+    return {
+      settings: normalizeSettings(DEFAULT_SETTINGS),
+      history: []
+    };
+  }
+
+  return {
+    settings: normalizeSettings(payload.settings || DEFAULT_SETTINGS),
+    history: normalizeHistory(payload.history)
+  };
+}
+
+function writeUserProfile(userId, profile) {
+  writeJsonFile(profilePath(userId), {
+    settings: normalizeSettings(profile.settings),
+    history: normalizeHistory(profile.history)
   });
+}
+
+function mergeHistory(existing, incoming) {
+  return normalizeHistory([...(incoming || []), ...(existing || [])]);
+}
+
+function setJsonHeaders(extraHeaders = {}) {
+  return {
+    "Content-Type": "application/json; charset=utf-8",
+    "Cache-Control": "no-store",
+    ...extraHeaders
+  };
+}
+
+function sendJson(res, statusCode, payload, headers = {}) {
+  const body = JSON.stringify(payload);
+  res.writeHead(statusCode, setJsonHeaders(headers));
   res.end(body);
 }
 
-function sendText(res, statusCode, payload, contentType = "text/plain; charset=utf-8") {
+function sendText(res, statusCode, payload, contentType = "text/plain; charset=utf-8", headers = {}) {
   res.writeHead(statusCode, {
     "Content-Type": contentType,
-    "Cache-Control": "no-store"
+    "Cache-Control": "no-store",
+    ...headers
   });
   res.end(payload);
 }
@@ -133,8 +293,24 @@ function validateEmail(value) {
   return emailRegex.test(normalized) ? normalized : null;
 }
 
+function validatePassword(password) {
+  const normalized = String(password || "");
+  if (normalized.length < PASSWORD_MIN_LENGTH) {
+    throw new AppError(400, `Password must be at least ${PASSWORD_MIN_LENGTH} characters long.`);
+  }
+  return normalized;
+}
+
 function clamp(value, min, max) {
   return Math.min(max, Math.max(min, value));
+}
+
+function clampNumber(value, min, max, fallback) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) {
+    return fallback;
+  }
+  return clamp(numeric, min, max);
 }
 
 function delay(ms) {
@@ -223,6 +399,151 @@ function mapNetworkError(error) {
   }
 
   return new AppError(500, "Unexpected server error.");
+}
+
+function base64UrlEncode(value) {
+  return Buffer.from(value, "utf8").toString("base64url");
+}
+
+function base64UrlDecode(value) {
+  return Buffer.from(value, "base64url").toString("utf8");
+}
+
+function signSessionPayload(payload) {
+  return crypto.createHmac("sha256", SESSION_SECRET).update(payload).digest("base64url");
+}
+
+function createSessionToken(userId) {
+  const payload = base64UrlEncode(
+    JSON.stringify({
+      userId,
+      expiresAt: Date.now() + SESSION_TTL_MS,
+      nonce: crypto.randomBytes(12).toString("hex")
+    })
+  );
+  return `${payload}.${signSessionPayload(payload)}`;
+}
+
+function parseCookies(req) {
+  const header = req.headers.cookie || "";
+  const cookies = {};
+
+  for (const chunk of header.split(";")) {
+    const [key, ...rest] = chunk.trim().split("=");
+    if (!key) {
+      continue;
+    }
+    try {
+      cookies[key] = decodeURIComponent(rest.join("="));
+    } catch (error) {
+      cookies[key] = rest.join("=");
+    }
+  }
+
+  return cookies;
+}
+
+function verifySessionToken(token) {
+  if (typeof token !== "string" || !token.includes(".")) {
+    return null;
+  }
+
+  const [payload, signature] = token.split(".");
+  const expectedSignature = signSessionPayload(payload);
+  const signatureBuffer = Buffer.from(signature || "", "utf8");
+  const expectedBuffer = Buffer.from(expectedSignature, "utf8");
+
+  if (
+    signatureBuffer.length !== expectedBuffer.length ||
+    !crypto.timingSafeEqual(signatureBuffer, expectedBuffer)
+  ) {
+    return null;
+  }
+
+  try {
+    const parsed = JSON.parse(base64UrlDecode(payload));
+    if (!parsed?.userId || Number(parsed.expiresAt) < Date.now()) {
+      return null;
+    }
+    return parsed;
+  } catch (error) {
+    return null;
+  }
+}
+
+function sessionCookie(token) {
+  const maxAgeSeconds = Math.floor(SESSION_TTL_MS / 1000);
+  return `${SESSION_COOKIE_NAME}=${encodeURIComponent(token)}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${maxAgeSeconds}`;
+}
+
+function clearSessionCookie() {
+  return `${SESSION_COOKIE_NAME}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0`;
+}
+
+function findUserByEmail(email) {
+  return readUsers().find((user) => user.email === email) || null;
+}
+
+function findUserById(userId) {
+  return readUsers().find((user) => user.id === userId) || null;
+}
+
+function hashPassword(password, salt = crypto.randomBytes(16).toString("hex")) {
+  const iterations = 210000;
+  const hash = crypto.pbkdf2Sync(password, salt, iterations, 32, "sha256").toString("hex");
+  return `pbkdf2$${iterations}$${salt}$${hash}`;
+}
+
+function verifyPassword(password, encodedHash) {
+  const [scheme, iterations, salt, digest] = String(encodedHash || "").split("$");
+  if (scheme !== "pbkdf2" || !iterations || !salt || !digest) {
+    return false;
+  }
+
+  const computed = crypto
+    .pbkdf2Sync(password, salt, Number(iterations), 32, "sha256")
+    .toString("hex");
+
+  const left = Buffer.from(computed, "utf8");
+  const right = Buffer.from(digest, "utf8");
+
+  return left.length === right.length && crypto.timingSafeEqual(left, right);
+}
+
+function safeUser(user) {
+  return {
+    id: user.id,
+    name: user.name,
+    email: user.email,
+    createdAt: user.createdAt,
+    lastLoginAt: user.lastLoginAt || null
+  };
+}
+
+function buildWorkspacePayload(user) {
+  const profile = readUserProfile(user.id);
+  return {
+    authenticated: true,
+    user: safeUser(user),
+    settings: profile.settings,
+    history: profile.history
+  };
+}
+
+function requireAuthenticatedUser(req) {
+  const cookies = parseCookies(req);
+  const parsedSession = verifySessionToken(cookies[SESSION_COOKIE_NAME]);
+
+  if (!parsedSession) {
+    throw new AppError(401, "Please sign in to continue.");
+  }
+
+  const user = findUserById(parsedSession.userId);
+  if (!user) {
+    throw new AppError(401, "Session expired. Please sign in again.");
+  }
+
+  return user;
 }
 
 async function fetchJson(url, options = {}) {
@@ -516,8 +837,7 @@ async function analyzeEmail(senderEmail) {
       trustScore = clamp(trustScore, 0, 100);
       const threatLevel = trustToThreatLevel(trustScore);
       const disposable = disifyResult.disposable || Boolean(abstractResult?.isDisposableEmail);
-      const providerChecksUnavailable =
-        !hasDisifyResult || !hasAbstractResult;
+      const providerChecksUnavailable = !hasDisifyResult || !hasAbstractResult;
 
       if (threatLevel === "dangerous") {
         summary = "The sender address shows multiple phishing indicators.";
@@ -617,6 +937,64 @@ async function serveStaticAsset(req, res, pathname) {
   }
 }
 
+function createUser(body) {
+  const email = validateEmail(body.email);
+  const password = validatePassword(body.password);
+  const name = String(body.name || "").trim().slice(0, 60);
+
+  if (!name) {
+    throw new AppError(400, "Please provide a display name.");
+  }
+
+  if (!email) {
+    throw new AppError(400, "Please enter a valid email address.");
+  }
+
+  if (findUserByEmail(email)) {
+    throw new AppError(409, "An account already exists for this email.");
+  }
+
+  const now = new Date().toISOString();
+  const user = {
+    id: crypto.randomUUID(),
+    name,
+    email,
+    passwordHash: hashPassword(password),
+    createdAt: now,
+    lastLoginAt: now
+  };
+
+  const users = readUsers();
+  users.push(user);
+  writeUsers(users);
+  writeUserProfile(user.id, {
+    settings: DEFAULT_SETTINGS,
+    history: []
+  });
+
+  return user;
+}
+
+function loginUser(body) {
+  const email = validateEmail(body.email);
+  const password = String(body.password || "");
+
+  if (!email) {
+    throw new AppError(400, "Please enter a valid email address.");
+  }
+
+  const users = readUsers();
+  const user = users.find((entry) => entry.email === email);
+
+  if (!user || !verifyPassword(password, user.passwordHash)) {
+    throw new AppError(401, "Email or password is incorrect.");
+  }
+
+  user.lastLoginAt = new Date().toISOString();
+  writeUsers(users);
+  return user;
+}
+
 async function handleApiRequest(req, res, pathname) {
   if (req.method === "GET" && pathname === "/health") {
     return sendJson(res, 200, {
@@ -626,11 +1004,96 @@ async function handleApiRequest(req, res, pathname) {
     });
   }
 
+  if (req.method === "GET" && pathname === "/api/session") {
+    try {
+      const user = requireAuthenticatedUser(req);
+      return sendJson(res, 200, buildWorkspacePayload(user));
+    } catch (error) {
+      if (error instanceof AppError && error.statusCode === 401) {
+        return sendJson(res, 200, {
+          authenticated: false,
+          settings: normalizeSettings(DEFAULT_SETTINGS),
+          history: []
+        });
+      }
+      throw error;
+    }
+  }
+
   if (req.method !== "POST") {
     throw new AppError(405, "Method not allowed.");
   }
 
   const body = await readJsonBody(req);
+
+  if (pathname === "/api/auth/register") {
+    const user = createUser(body);
+    return sendJson(res, 201, buildWorkspacePayload(user), {
+      "Set-Cookie": sessionCookie(createSessionToken(user.id))
+    });
+  }
+
+  if (pathname === "/api/auth/login") {
+    const user = loginUser(body);
+    return sendJson(res, 200, buildWorkspacePayload(user), {
+      "Set-Cookie": sessionCookie(createSessionToken(user.id))
+    });
+  }
+
+  if (pathname === "/api/auth/logout") {
+    return sendJson(
+      res,
+      200,
+      { ok: true },
+      {
+        "Set-Cookie": clearSessionCookie()
+      }
+    );
+  }
+
+  if (pathname === "/api/settings") {
+    const user = requireAuthenticatedUser(req);
+    const profile = readUserProfile(user.id);
+    profile.settings = normalizeSettings(body);
+    writeUserProfile(user.id, profile);
+    return sendJson(res, 200, {
+      ok: true,
+      settings: profile.settings
+    });
+  }
+
+  if (pathname === "/api/history/sync") {
+    const user = requireAuthenticatedUser(req);
+    const profile = readUserProfile(user.id);
+    profile.history = mergeHistory(profile.history, body.records);
+    writeUserProfile(user.id, profile);
+    return sendJson(res, 200, {
+      ok: true,
+      history: profile.history
+    });
+  }
+
+  if (pathname === "/api/history/append") {
+    const user = requireAuthenticatedUser(req);
+    const profile = readUserProfile(user.id);
+    profile.history = mergeHistory(profile.history, [body.record]);
+    writeUserProfile(user.id, profile);
+    return sendJson(res, 200, {
+      ok: true,
+      history: profile.history
+    });
+  }
+
+  if (pathname === "/api/history/clear") {
+    const user = requireAuthenticatedUser(req);
+    const profile = readUserProfile(user.id);
+    profile.history = [];
+    writeUserProfile(user.id, profile);
+    return sendJson(res, 200, {
+      ok: true,
+      history: []
+    });
+  }
 
   if (pathname === "/api/scan/url") {
     const targetUrl = validateUrl(body.url);
