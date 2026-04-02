@@ -566,19 +566,22 @@ select:focus {
 }
 
 .detail-grid {
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(8.5rem, 1fr));
   margin-top: 1rem;
 }
 
 .detail-card {
+  min-width: 0;
   padding: 0.95rem;
 }
 
 .detail-card strong {
   display: block;
   margin-top: 0.35rem;
-  font-size: 1.3rem;
+  font-size: clamp(1rem, 2vw, 1.3rem);
   color: var(--ink-strong);
+  line-height: 1.15;
+  overflow-wrap: anywhere;
 }
 
 .detail-card span {

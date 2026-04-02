@@ -429,14 +429,45 @@ async function analyzeEmail(senderEmail) {
     `email:${senderEmail}`,
     SCAN_CACHE_TTL_MS.email,
     async () => {
-      const [disifyResult, abstractResult] = await Promise.all([
+      const fallbackDomain = senderEmail.split("@")[1] || "";
+      const hasAbstractKey = Boolean(process.env.ABSTRACT_API_KEY);
+      const [disifyResponse, abstractResponse] = await Promise.allSettled([
         checkDisify(senderEmail),
         validateWithAbstract(senderEmail)
       ]);
+      const hasDisifyResult = disifyResponse.status === "fulfilled";
+      const hasAbstractResult =
+        abstractResponse.status === "fulfilled" && Boolean(abstractResponse.value);
 
+      const disifyResult =
+        hasDisifyResult
+          ? disifyResponse.value
+          : {
+              domain: fallbackDomain,
+              disposable: false,
+              dns: true,
+              format: true
+            };
+      const abstractResult =
+        abstractResponse.status === "fulfilled" ? abstractResponse.value : null;
       const heuristicResult = computeEmailHeuristics(senderEmail);
       const flags = [];
       let trustScore = 100;
+      let summary = "No strong phishing indicators were found for this sender address.";
+
+      if (!hasDisifyResult) {
+        flags.push("Disify checks are temporarily unavailable, so sender validation is using other signals.");
+      }
+
+      if (abstractResponse.status === "rejected") {
+        flags.push(
+          "Abstract deliverability checks are temporarily unavailable, so the result is based on the remaining checks."
+        );
+      } else if (!hasAbstractKey) {
+        flags.push(
+          "Abstract deliverability checks are unavailable until ABSTRACT_API_KEY is configured."
+        );
+      }
 
       if (!disifyResult.format) {
         flags.push("Email format is invalid.");
@@ -475,10 +506,6 @@ async function analyzeEmail(senderEmail) {
         if (!Number.isNaN(abstractResult.qualityScore)) {
           trustScore = Math.round((trustScore + abstractResult.qualityScore * 100) / 2);
         }
-      } else {
-        flags.push(
-          "Abstract deliverability checks are unavailable until ABSTRACT_API_KEY is configured."
-        );
       }
 
       for (const signal of heuristicResult.signals) {
@@ -489,6 +516,20 @@ async function analyzeEmail(senderEmail) {
       trustScore = clamp(trustScore, 0, 100);
       const threatLevel = trustToThreatLevel(trustScore);
       const disposable = disifyResult.disposable || Boolean(abstractResult?.isDisposableEmail);
+      const providerChecksUnavailable =
+        !hasDisifyResult || !hasAbstractResult;
+
+      if (threatLevel === "dangerous") {
+        summary = "The sender address shows multiple phishing indicators.";
+      } else if (threatLevel === "suspicious") {
+        summary = "The sender address needs extra verification before you trust it.";
+      } else if (!hasDisifyResult && !hasAbstractResult) {
+        summary =
+          "Live email validation services are limited right now, so this result uses local sender heuristics only.";
+      } else if (providerChecksUnavailable) {
+        summary =
+          "No strong phishing indicators were found, but some live validation checks are currently unavailable.";
+      }
 
       return {
         type: "email",
@@ -498,12 +539,7 @@ async function analyzeEmail(senderEmail) {
         threatLevel,
         disposable,
         flags,
-        summary:
-          threatLevel === "dangerous"
-            ? "The sender address shows multiple phishing indicators."
-            : threatLevel === "suspicious"
-              ? "The sender address needs extra verification before you trust it."
-              : "No strong phishing indicators were found for this sender address.",
+        summary,
         checks: {
           disify: disifyResult,
           abstract: abstractResult
