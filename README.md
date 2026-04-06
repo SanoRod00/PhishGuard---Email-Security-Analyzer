@@ -301,6 +301,103 @@ When the deployment is correct:
 - email verification and password reset continue to work across both web servers
 - users can authenticate successfully even when consecutive requests hit different backend nodes
 
+### Docker lab deployment used in this project
+
+For the provided Docker lab, I deployed to these containers:
+
+- `web-01`
+- `web-02`
+- `lb-01`
+
+The containers were initially stopped, so I started them from the host:
+
+```bash
+docker start web-01 web-02 lb-01
+```
+
+I then staged the project onto both web containers:
+
+```bash
+docker exec web-01 sh -lc 'mkdir -p /opt/phishguard'
+docker exec web-02 sh -lc 'mkdir -p /opt/phishguard'
+docker cp . web-01:/opt/phishguard
+docker cp . web-02:/opt/phishguard
+```
+
+Because this lab gives only two web containers and one load balancer container, but no dedicated PostgreSQL container, the deployed lab runtime used:
+
+- `STORAGE_DRIVER=memory`
+- identical JWT secrets on both web nodes
+- `FRONTEND_URL=https://localhost:4443`
+- empty SMTP settings so email links are logged instead of sent
+
+I wrote the runtime `.env` into both web containers and started the Node app on each node with:
+
+```bash
+docker exec web-01 sh -lc 'cd /opt/phishguard && nohup node server.js >/var/log/phishguard.log 2>&1 </dev/null &'
+docker exec web-02 sh -lc 'cd /opt/phishguard && nohup node server.js >/var/log/phishguard.log 2>&1 </dev/null &'
+```
+
+I installed the nginx reverse-proxy config from `deploy/nginx/phishguard.conf` onto both web nodes and started nginx:
+
+```bash
+docker cp deploy/nginx/phishguard.conf web-01:/etc/nginx/sites-available/default
+docker cp deploy/nginx/phishguard.conf web-02:/etc/nginx/sites-available/default
+docker exec web-01 sh -lc 'nginx -t && service nginx start'
+docker exec web-02 sh -lc 'nginx -t && service nginx start'
+```
+
+On `lb-01`, I installed the HAProxy config from `deploy/haproxy/haproxy.cfg`. That config does three important things:
+
+- redirects HTTP on port `80` to `https://localhost:4443`
+- terminates TLS on port `443`
+- balances traffic between `web-01:80` and `web-02:80`
+
+It also sets:
+
+- `X-Served-By` so the selected backend is visible in responses
+- a HAProxy cookie (`PHGSRV`) so an interactive browser session can stay on one backend in this memory-storage lab setup
+
+The load balancer was applied with:
+
+```bash
+docker cp deploy/haproxy/haproxy.cfg lb-01:/etc/haproxy/haproxy.cfg
+docker exec lb-01 sh -lc 'haproxy -c -f /etc/haproxy/haproxy.cfg && service haproxy start'
+```
+
+### Validation performed
+
+I verified the deployment from the host with these checks:
+
+```bash
+curl -I http://localhost:8082
+curl -k https://localhost:4443
+for i in 1 2 3 4 5 6; do curl -skI https://localhost:4443 | grep -i X-Served-By; done
+```
+
+Observed results:
+
+- `curl -I http://localhost:8082` returned `301 Moved Permanently`
+- the `Location` header was `https://localhost:4443/`
+- `curl -k https://localhost:4443` returned the app response and redirected to `/login`
+- repeated HTTPS requests alternated between `web-01` and `web-02`
+
+Example balancing output:
+
+```text
+x-served-by: web-02
+x-served-by: web-01
+x-served-by: web-02
+x-served-by: web-01
+```
+
+This confirmed that:
+
+- the app is reachable through the load balancer
+- HTTP traffic is redirected to HTTPS
+- HTTPS traffic is distributed across both backend web servers
+- the load balancer is correctly interacting with both web nodes
+
 ## Security Checklist
 
 See `SECURITY_CHECKLIST.md`.
