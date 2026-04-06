@@ -44,7 +44,7 @@ PhishGuard is a protected email-review workspace for suspicious URLs and sender 
    - `JWT_SECRET`
    - `JWT_REFRESH_SECRET`
 4. Configure SMTP credentials if you want real email delivery.
-   In development, the app logs verification/reset links when SMTP is not configured.
+   In development, the app logs verification/reset links when SMTP is not configured or when a local SMTP server is unavailable.
 5. Install dependencies:
 
 ```bash
